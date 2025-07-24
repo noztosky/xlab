@@ -107,6 +107,13 @@ class XlabPlayer(private val context: Context) {
     }
     
     /**
+     * 현재 재생 중인 URL 반환
+     */
+    fun getCurrentPlayingUrl(): String? {
+        return currentPlayingUrl
+    }
+    
+    /**
      * 버퍼시간 즉시 적용 (재생 중에도 적용 가능)
      */
     fun applyBufferTime(networkSeconds: Float, liveSeconds: Float) {

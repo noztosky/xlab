@@ -17,29 +17,30 @@
 
     </FrameLayout>
 
+    <!-- 전체화면 버튼 (우측 위) -->
+    <Button
+        android:id="@+id/fullscreen_button"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:text="⛶"
+        android:textSize="16sp"
+        android:background="@drawable/button_background_10_percent_black"
+        android:textColor="@android:color/white"
+        android:gravity="center"
+        android:backgroundTint="@null"
+        android:padding="0dp"
+        android:layout_gravity="end|top"
+        android:layout_marginTop="@dimen/button_margin"
+        android:layout_marginEnd="@dimen/button_margin" />
+
     <!-- PTZ 제어 버튼들 오버레이 -->
     <LinearLayout
+        android:id="@+id/ptz_buttons_layout"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:gravity="end|bottom"
         android:padding="16dp">
-
-        <!-- 전체화면 버튼 (오른쪽 위) -->
-        <Button
-            android:id="@+id/fullscreen_button"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
-            android:text="⛶"
-            android:textSize="16sp"
-            android:background="@drawable/button_background_10_percent_black"
-            android:textColor="@android:color/white"
-            android:gravity="center"
-            android:backgroundTint="@null"
-            android:padding="0dp"
-            android:layout_gravity="end|top"
-            android:layout_marginTop="@dimen/button_margin"
-            android:layout_marginEnd="@dimen/button_margin" />
 
         <!-- PTZ 제어 버튼 그룹 -->
         <LinearLayout
@@ -177,6 +178,7 @@
 
         <!-- 녹화/사진 버튼들 (오른쪽 아래) -->
         <LinearLayout
+            android:id="@+id/record_photo_layout"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:orientation="vertical"

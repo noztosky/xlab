@@ -28,7 +28,8 @@
             android:name=".H265DemoActivity"
             android:exported="true"
             android:label="H.265 Player Demo"
-            android:screenOrientation="portrait">
+            android:screenOrientation="unspecified"
+            android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

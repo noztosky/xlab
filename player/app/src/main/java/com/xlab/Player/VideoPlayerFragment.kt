@@ -9,6 +9,7 @@ import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
 
 /**
@@ -45,10 +46,16 @@ class VideoPlayerFragment : Fragment() {
         fun onPhotoCapture()
     }
     
+    // 전체화면 콜백 인터페이스
+    interface FullscreenCallback {
+        fun onToggleFullscreen()
+    }
+    
     private var xlabPlayer: XlabPlayer? = null
     private lateinit var surfaceView: SurfaceView
     private var playerStateCallback: PlayerStateCallback? = null
     private var ptzControlCallback: PTZControlCallback? = null
+    private var fullscreenCallback: FullscreenCallback? = null
     private var isConnected = false
     private var isPlaying = false
     private var isRecording = false
@@ -79,6 +86,9 @@ class VideoPlayerFragment : Fragment() {
     // 전체화면 버튼
     private lateinit var fullscreenButton: Button
     
+    // 전체화면 상태 추적
+    private var isFullscreenMode = false
+    
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -93,6 +103,118 @@ class VideoPlayerFragment : Fragment() {
         initViews()
         setupVideoPlayer()
         setupPTZControls()
+    }
+    
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        Log.d(TAG, "Fragment 화면 방향 변경: ${newConfig.orientation}")
+        
+        // 비디오 플레이어가 재생 중이면 화면 비율 조정
+        if (isPlaying && xlabPlayer != null) {
+            adjustVideoAspectRatio()
+        }
+    }
+    
+    private fun adjustVideoAspectRatio() {
+        try {
+            // 현재 화면 방향과 전체화면 모드 상태에 따라 비디오 비율 조정
+            val orientation = resources.configuration.orientation
+            val isLandscape = orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+            
+            if (isLandscape || isFullscreenMode) {
+                // 가로 모드이거나 전체화면 모드에서는 비디오가 전체 화면을 차지하도록
+                surfaceView.layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                
+                // 전체화면 모드에서 추가 레이아웃 조정
+                if (isFullscreenMode) {
+                    // SurfaceView 자체의 패딩만 제거
+                    surfaceView.setPadding(0, 0, 0, 0)
+                }
+                
+                Log.d(TAG, "전체화면 비율 적용 (가로모드 또는 전체화면모드)")
+            } else {
+                // 세로 모드에서는 원래 비율 유지
+                surfaceView.layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                Log.d(TAG, "일반 비율 적용 (세로모드)")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "비디오 비율 조정 실패", e)
+        }
+    }
+    
+    /**
+     * 전체화면 모드를 위한 강제 비디오 비율 조정
+     */
+    fun adjustVideoAspectRatioForFullscreen() {
+        try {
+            Log.d(TAG, "전체화면 모드 비디오 비율 강제 조정")
+            
+            // Fragment의 루트 뷰를 전체 화면으로 설정
+            view?.let { fragmentView ->
+                val rootParams = fragmentView.layoutParams
+                rootParams?.let { params ->
+                    params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    params.height = ViewGroup.LayoutParams.MATCH_PARENT
+                    fragmentView.layoutParams = params
+                }
+                
+                // Fragment의 크기 로그 출력
+                fragmentView.post {
+                    Log.d(TAG, "Fragment 크기 - 너비: ${fragmentView.width}, 높이: ${fragmentView.height}")
+                    Log.d(TAG, "Fragment 레이아웃 파라미터 - 너비: ${rootParams.width}, 높이: ${rootParams.height}")
+                }
+            }
+            
+            // SurfaceView를 전체 화면으로 설정
+            surfaceView.layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            
+            // SurfaceView 자체의 패딩만 제거
+            surfaceView.setPadding(0, 0, 0, 0)
+            
+            // SurfaceView 크기 로그 출력
+            surfaceView.post {
+                Log.d(TAG, "SurfaceView 크기 - 너비: ${surfaceView.width}, 높이: ${surfaceView.height}")
+            }
+            
+            Log.d(TAG, "전체화면 모드 비디오 비율 조정 완료")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "전체화면 모드 비디오 비율 조정 실패", e)
+        }
+    }
+    
+    /**
+     * Fragment 자체에서 전체화면 모드 토글 (외부에서 호출 가능)
+     */
+    fun toggleFullscreenMode() {
+        toggleFullscreen()
+    }
+    
+    /**
+     * Fragment 자체에서 전체화면 모드 설정
+     */
+    fun setFullscreenMode(fullscreen: Boolean) {
+        if (isFullscreenMode != fullscreen) {
+            isFullscreenMode = fullscreen
+            adjustVideoAspectRatio()
+            updateFullscreenButtonPosition()
+        }
+    }
+    
+    /**
+     * 현재 전체화면 모드 상태 반환
+     */
+    fun isInFullscreenMode(): Boolean {
+        return isFullscreenMode
     }
     
     private fun initViews() {
@@ -324,11 +446,53 @@ class VideoPlayerFragment : Fragment() {
     private fun toggleFullscreen() {
         try {
             Log.d(TAG, "전체화면 토글")
-            // TODO: 전체화면 기능 구현
-            // 현재는 로그만 출력
-            Log.d(TAG, "전체화면 기능은 아직 구현되지 않았습니다")
+            
+            // 전체화면 상태 토글
+            isFullscreenMode = !isFullscreenMode
+            
+            // 전체화면 버튼 위치 업데이트
+            updateFullscreenButtonPosition()
+            
+            // 비디오 비율 조정 (화면 회전과 동일한 효과)
+            adjustVideoAspectRatio()
+            
+            // 부모 액티비티에 전체화면 모드 전환 요청
+            Log.d(TAG, "전체화면 콜백 상태 확인: ${fullscreenCallback != null}")
+            Log.d(TAG, "전체화면 콜백 객체 타입: ${fullscreenCallback?.javaClass?.simpleName}")
+            fullscreenCallback?.let { callback ->
+                Log.d(TAG, "전체화면 콜백 호출 시작")
+                try {
+                    Log.d(TAG, "콜백 함수 호출 직전")
+                    
+                    callback.onToggleFullscreen()
+                    
+                    Log.d(TAG, "콜백 함수 호출 직후")
+                    Log.d(TAG, "전체화면 콜백 호출 완료")
+                } catch (e: Exception) {
+                    Log.e(TAG, "전체화면 콜백 호출 실패", e)
+                }
+            } ?: run {
+                Log.w(TAG, "전체화면 콜백이 설정되지 않음")
+            }
+            
         } catch (e: Exception) {
             Log.e(TAG, "전체화면 토글 실패", e)
+        }
+    }
+    
+
+    
+    /**
+     * 전체화면 버튼 위치 업데이트
+     */
+    private fun updateFullscreenButtonPosition() {
+        try {
+            // 전체화면 모드에서는 버튼을 항상 우측 위에 유지
+            // 위치 변경 없이 그대로 유지
+            Log.d(TAG, "전체화면 버튼 위치 유지 (우측 위)")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "전체화면 버튼 위치 업데이트 실패", e)
         }
     }
     
@@ -370,6 +534,14 @@ class VideoPlayerFragment : Fragment() {
      */
     fun setPTZControlCallback(callback: PTZControlCallback) {
         this.ptzControlCallback = callback
+    }
+    
+    /**
+     * 전체화면 콜백 설정
+     */
+    fun setFullscreenCallback(callback: FullscreenCallback) {
+        Log.d(TAG, "전체화면 콜백 설정됨: ${callback.javaClass.simpleName}")
+        this.fullscreenCallback = callback
     }
     
     /**
