@@ -38,31 +38,23 @@ class H265DemoActivity : AppCompatActivity() {
         )
     }
     
-    // UI 컴포넌트
-    private lateinit var urlEditText: EditText
-    private lateinit var statusTextView: TextView
-    private lateinit var versionTextView: TextView
-    private lateinit var connectButton: Button
-    private lateinit var disconnectButton: Button
-    private lateinit var playButton: Button
-    private lateinit var pauseButton: Button
+    // UI 컴포넌트 - Player 1
+    private lateinit var urlEditText1: EditText
+    private lateinit var connectButton1: Button
+    private lateinit var disconnectButton1: Button
+    private lateinit var playButton1: Button
+    private lateinit var pauseButton1: Button
     
-    // PTZ 슬라이더 컴포넌트
-    private lateinit var panSeekBar: SeekBar
-    private lateinit var tiltSeekBar: SeekBar
-    private lateinit var zoomSeekBar: SeekBar
-    private lateinit var panValueText: TextView
-    private lateinit var tiltValueText: TextView
-    private lateinit var zoomValueText: TextView
-    private lateinit var ptzResetButton: Button
-    
-
-    
-    // 슬라이더 프로그래밍적 업데이트 플래그
-    private var isUpdatingSliders = false
+    // UI 컴포넌트 - Player 2
+    private lateinit var urlEditText2: EditText
+    private lateinit var connectButton2: Button
+    private lateinit var disconnectButton2: Button
+    private lateinit var playButton2: Button
+    private lateinit var pauseButton2: Button
     
     // 비디오 플레이어 Fragment
-    private var videoPlayerFragment: VideoPlayerFragment? = null
+    private var videoPlayerFragment1: VideoPlayerFragment? = null
+    private var videoPlayerFragment2: VideoPlayerFragment? = null
     
     // SharedPreferences for URL memory
     private lateinit var prefs: SharedPreferences
@@ -97,7 +89,7 @@ class H265DemoActivity : AppCompatActivity() {
             window.decorView.post {
                 expandToFullscreen()
                 // Fragment의 컨트롤 버튼들이 회전 후에도 제대로 표시되도록 강제로 레이아웃 조정
-                videoPlayerFragment?.let { fragment ->
+                videoPlayerFragment1?.let { fragment ->
                     fragment.adjustVideoAspectRatioForFullscreen()
                 }
             }
@@ -110,405 +102,268 @@ class H265DemoActivity : AppCompatActivity() {
     }
     
     private fun initViews() {
-        urlEditText = findViewById(R.id.url_edit_text)
-        statusTextView = findViewById(R.id.status_text_view)
-        versionTextView = findViewById(R.id.version_text_view)
-        connectButton = findViewById(R.id.connect_button)
-        disconnectButton = findViewById(R.id.disconnect_button)
-        playButton = findViewById(R.id.play_button)
-        pauseButton = findViewById(R.id.pause_button)
+        // Player 1 UI 초기화
+        urlEditText1 = findViewById(R.id.url_edit_text1)
+        connectButton1 = findViewById(R.id.connect_button1)
+        disconnectButton1 = findViewById(R.id.disconnect_button1)
+        playButton1 = findViewById(R.id.play_button1)
+        pauseButton1 = findViewById(R.id.pause_button1)
         
-        // PTZ 슬라이더 초기화
-        panSeekBar = findViewById(R.id.pan_seek_bar)
-        tiltSeekBar = findViewById(R.id.tilt_seek_bar)
-        zoomSeekBar = findViewById(R.id.zoom_seek_bar)
-        panValueText = findViewById(R.id.pan_value_text)
-        tiltValueText = findViewById(R.id.tilt_value_text)
-        zoomValueText = findViewById(R.id.zoom_value_text)
-        ptzResetButton = findViewById(R.id.ptz_reset_button)
-        
-
+        // Player 2 UI 초기화
+        urlEditText2 = findViewById(R.id.url_edit_text2)
+        connectButton2 = findViewById(R.id.connect_button2)
+        disconnectButton2 = findViewById(R.id.disconnect_button2)
+        playButton2 = findViewById(R.id.play_button2)
+        pauseButton2 = findViewById(R.id.pause_button2)
         
         // 마지막 사용한 URL 복원 또는 기본 URL 설정
-        val lastUrl = prefs.getString(PREF_LAST_URL, TEST_RTSP_URLS[0])
-        urlEditText.setText(lastUrl)
+        val lastUrl1 = prefs.getString(PREF_LAST_URL + "1", TEST_RTSP_URLS[0])
+        val lastUrl2 = prefs.getString(PREF_LAST_URL + "2", TEST_RTSP_URLS[1])
+        urlEditText1.setText(lastUrl1)
+        urlEditText2.setText(lastUrl2)
         
-        // 초기 상태 설정
-        disconnectButton.isEnabled = false
-        playButton.isEnabled = false
-        pauseButton.isEnabled = false
+        // 초기 상태 설정 - Player 1
+        disconnectButton1.isEnabled = false
+        playButton1.isEnabled = false
+        pauseButton1.isEnabled = false
         
-        // PTZ 슬라이더 초기 설정
-        setupPTZSliders()
+        // 초기 상태 설정 - Player 2
+        disconnectButton2.isEnabled = false
+        playButton2.isEnabled = false
+        pauseButton2.isEnabled = false
     }
     
     private fun setupListeners() {
-        connectButton.setOnClickListener { connectToStream() }
-        disconnectButton.setOnClickListener { disconnectFromStream() }
-        playButton.setOnClickListener { playStream() }
-        pauseButton.setOnClickListener { pauseStream() }
+        // Player 1 리스너
+        connectButton1.setOnClickListener { connectToStream(1) }
+        disconnectButton1.setOnClickListener { disconnectFromStream(1) }
+        playButton1.setOnClickListener { playStream(1) }
+        pauseButton1.setOnClickListener { pauseStream(1) }
         
-        // PTZ 리셋 버튼 리스너
-        ptzResetButton.setOnClickListener {
-            videoPlayerFragment?.let { fragment ->
-                // VideoPlayerFragment의 홈 이동 메서드 호출
-                fragment.moveToHome()
-                updateStatus("PTZ 홈 포지션으로 이동 요청됨")
-            }
-        }
+        // Player 2 리스너
+        connectButton2.setOnClickListener { connectToStream(2) }
+        disconnectButton2.setOnClickListener { disconnectFromStream(2) }
+        playButton2.setOnClickListener { playStream(2) }
+        pauseButton2.setOnClickListener { pauseStream(2) }
     }
     
     private fun setupVideoPlayerFragment() {
         Log.d(TAG, "VideoPlayerFragment 생성 시작")
-        // VideoPlayerFragment 추가
-        videoPlayerFragment = VideoPlayerFragment.newInstance()
+        
+        // VideoPlayerFragment1 추가
+        videoPlayerFragment1 = VideoPlayerFragment.newInstance()
         supportFragmentManager.beginTransaction()
-            .replace(R.id.video_player_container, videoPlayerFragment!!)
-            .commitNow()  // commitNow()를 사용하여 즉시 실행
+            .replace(R.id.video_player_container1, videoPlayerFragment1!!)
+            .commitNow()
+        
+        // VideoPlayerFragment2 추가
+        videoPlayerFragment2 = VideoPlayerFragment.newInstance()
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.video_player_container2, videoPlayerFragment2!!)
+            .commitNow()
         
         Log.d(TAG, "Fragment 트랜잭션 완료")
         
         // Fragment가 완전히 생성된 후 콜백 설정을 위해 post 사용
-        videoPlayerFragment?.view?.post {
-            Log.d(TAG, "Fragment 완전히 생성됨, 콜백 설정 시작")
+        videoPlayerFragment1?.view?.post {
+            Log.d(TAG, "Fragment1 완전히 생성됨, 콜백 설정 시작")
+            setupCallbacks()
+        }
+        
+        videoPlayerFragment2?.view?.post {
+            Log.d(TAG, "Fragment2 완전히 생성됨, 콜백 설정 시작")
             setupCallbacks()
         }
         
         // 추가: 즉시 콜백 설정도 시도
         setupCallbacks()
-        
     }
     
     private fun setupCallbacks() {
         Log.d(TAG, "!!! setupCallbacks() 함수 실행됨 !!!")
-        // 상태 콜백 설정
-        videoPlayerFragment?.setPlayerStateCallback(object : VideoPlayerFragment.PlayerStateCallback {
+        
+        // Player 1 상태 콜백 설정
+        videoPlayerFragment1?.setPlayerStateCallback(object : VideoPlayerFragment.PlayerStateCallback {
             override fun onPlayerReady() {
                 runOnUiThread {
-                    updateStatus("플레이어 준비 완료")
+                    Log.d(TAG, "Player 1 준비 완료")
                 }
             }
             
             override fun onPlayerConnected() {
                 runOnUiThread {
-                    // 연결 후 버튼 상태 업데이트
-                    connectButton.isEnabled = false
-                    disconnectButton.isEnabled = true
-                    playButton.isEnabled = true
-                    pauseButton.isEnabled = false
-                    updateStatus("연결됨 - 재생 준비 완료")
-                    
-                    // 연결 후 PTZ 슬라이더 초기화
-                    updatePTZSliders(0.0f, 0.0f, 1.0f)
+                    connectButton1.isEnabled = false
+                    disconnectButton1.isEnabled = true
+                    playButton1.isEnabled = true
+                    pauseButton1.isEnabled = false
+                    Log.d(TAG, "Player 1 연결됨")
                 }
             }
             
             override fun onPlayerDisconnected() {
                 runOnUiThread {
-                    // 연결 해제 후 버튼 상태 업데이트
-                    connectButton.isEnabled = true
-                    disconnectButton.isEnabled = false
-                    playButton.isEnabled = false
-                    pauseButton.isEnabled = false
-                    updateStatus("연결 해제됨")
+                    connectButton1.isEnabled = true
+                    disconnectButton1.isEnabled = false
+                    playButton1.isEnabled = false
+                    pauseButton1.isEnabled = false
+                    Log.d(TAG, "Player 1 연결 해제됨")
                 }
             }
             
             override fun onPlayerPlaying() {
                 runOnUiThread {
-                    // 재생 중 버튼 상태 업데이트
-                    playButton.isEnabled = false
-                    pauseButton.isEnabled = true
-                    updateStatus("재생 중")
+                    playButton1.isEnabled = false
+                    pauseButton1.isEnabled = true
+                    Log.d(TAG, "Player 1 재생 중")
                 }
             }
             
             override fun onPlayerPaused() {
                 runOnUiThread {
-                    // 일시정지 후 버튼 상태 업데이트
-                    playButton.isEnabled = true
-                    pauseButton.isEnabled = false
-                    updateStatus("일시정지됨")
+                    playButton1.isEnabled = true
+                    pauseButton1.isEnabled = false
+                    Log.d(TAG, "Player 1 일시정지됨")
                 }
             }
             
             override fun onPlayerError(error: String) {
                 runOnUiThread {
-                    // 오류 발생 시 버튼 상태 업데이트
-                    connectButton.isEnabled = true
-                    disconnectButton.isEnabled = false
-                    playButton.isEnabled = false
-                    pauseButton.isEnabled = false
-                    updateStatus("오류 발생: $error")
+                    connectButton1.isEnabled = true
+                    disconnectButton1.isEnabled = false
+                    playButton1.isEnabled = false
+                    pauseButton1.isEnabled = false
+                    Log.d(TAG, "Player 1 오류 발생: $error")
                 }
             }
         })
         
-        // PTZ 제어 콜백 설정
-        videoPlayerFragment?.setPTZControlCallback(object : VideoPlayerFragment.PTZControlCallback {
-            override fun onPTZMove(direction: String, value: Int) {
+        // Player 2 상태 콜백 설정
+        videoPlayerFragment2?.setPlayerStateCallback(object : VideoPlayerFragment.PlayerStateCallback {
+            override fun onPlayerReady() {
                 runOnUiThread {
-                    when (direction) {
-                        "SYNC" -> {
-                            updateStatus("PTZ 초기 각도 동기화 완료")
-                            
-                            // 초기 동기화 시 현재 각도로 슬라이더 업데이트
-                            videoPlayerFragment?.let { fragment ->
-                                val (pan, tilt, zoom) = fragment.getCurrentPTZAngles()
-                                updatePTZSliders(pan, tilt, zoom)
-                            }
-                        }
-                        else -> {
-                            updateStatus("PTZ 이동: $direction, 값: $value")
-                            
-                            // PTZ 버튼 동작 후 현재 각도로 슬라이더 업데이트
-                            videoPlayerFragment?.let { fragment ->
-                                val (pan, tilt, zoom) = fragment.getCurrentPTZAngles()
-                                updatePTZSliders(pan, tilt, zoom)
-                            }
-                        }
-                    }
+                    Log.d(TAG, "Player 2 준비 완료")
                 }
             }
             
-            override fun onPTZHome() {
+            override fun onPlayerConnected() {
                 runOnUiThread {
-                    updateStatus("PTZ 홈 포지션으로 이동")
-                    
-                    // 홈 이동 후 슬라이더를 0도로 리셋
-                    updatePTZSliders(0.0f, 0.0f, 1.0f)
+                    connectButton2.isEnabled = false
+                    disconnectButton2.isEnabled = true
+                    playButton2.isEnabled = true
+                    pauseButton2.isEnabled = false
+                    Log.d(TAG, "Player 2 연결됨")
                 }
             }
             
-            override fun onRecordToggle() {
+            override fun onPlayerDisconnected() {
                 runOnUiThread {
-                    updateStatus("녹화 토글")
+                    connectButton2.isEnabled = true
+                    disconnectButton2.isEnabled = false
+                    playButton2.isEnabled = false
+                    pauseButton2.isEnabled = false
+                    Log.d(TAG, "Player 2 연결 해제됨")
                 }
             }
             
-            override fun onPhotoCapture() {
+            override fun onPlayerPlaying() {
                 runOnUiThread {
-                    updateStatus("사진 촬영")
+                    playButton2.isEnabled = false
+                    pauseButton2.isEnabled = true
+                    Log.d(TAG, "Player 2 재생 중")
+                }
+            }
+            
+            override fun onPlayerPaused() {
+                runOnUiThread {
+                    playButton2.isEnabled = true
+                    pauseButton2.isEnabled = false
+                    Log.d(TAG, "Player 2 일시정지됨")
+                }
+            }
+            
+            override fun onPlayerError(error: String) {
+                runOnUiThread {
+                    connectButton2.isEnabled = true
+                    disconnectButton2.isEnabled = false
+                    playButton2.isEnabled = false
+                    pauseButton2.isEnabled = false
+                    Log.d(TAG, "Player 2 오류 발생: $error")
                 }
             }
         })
         
-        // 전체화면 콜백 설정 (Fragment에서 Activity로 요청)
-        Log.d(TAG, "전체화면 콜백 설정 시작")
-        val callback = object : VideoPlayerFragment.FullscreenCallback {
+        // Player 1 전체화면 콜백 설정
+        Log.d(TAG, "Player 1 전체화면 콜백 설정 시작")
+        val callback1 = object : VideoPlayerFragment.FullscreenCallback {
             override fun onToggleFullscreen() {
-                Log.d(TAG, "!!! onToggleFullscreen() 콜백 함수 실행됨 !!!")
-                try {
-                    Log.d(TAG, "runOnUiThread 시작")
-                    runOnUiThread {
-                        Log.d(TAG, "Fragment에서 전체화면 토글 요청 받음")
-                        handleFullscreenToggle()
-                    }
-                    Log.d(TAG, "runOnUiThread 완료")
-                } catch (e: Exception) {
-                    Log.e(TAG, "onToggleFullscreen 오류", e)
+                runOnUiThread {
+                    handleFullscreenToggle(1)
                 }
             }
         }
-        Log.d(TAG, "콜백 객체 생성됨: ${callback.javaClass.simpleName}")
-        videoPlayerFragment?.setFullscreenCallback(callback)
-        Log.d(TAG, "전체화면 콜백 설정 완료")
-    }
-    
-
-    
-    /**
-     * PTZ 슬라이더 초기 설정
-     */
-    private fun setupPTZSliders() {
-        // 팬 슬라이더 설정 (-90 ~ 90도)
-        panSeekBar.max = 180
-        panSeekBar.progress = 90   // 0도 위치 (중앙)
-        panValueText.text = "0°"
+        videoPlayerFragment1?.setFullscreenCallback(callback1)
         
-        panSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser && !isUpdatingSliders) {
-                    val panAngle = 90 - progress  // 왼쪽(-90°) ~ 오른쪽(90°)로 변환
-                    Log.d(TAG, "사용자 팬 슬라이더 조작: ${panAngle}°")
-                    panValueText.text = "${-panAngle}°"  // 표시값만 반대로
-                    
-                    // VideoPlayerFragment에 팬 각도 전송
-                    videoPlayerFragment?.let { fragment ->
-                        fragment.setPanAngle(panAngle.toFloat())
-                    }
+        // Player 2 전체화면 콜백 설정
+        val callback2 = object : VideoPlayerFragment.FullscreenCallback {
+            override fun onToggleFullscreen() {
+                runOnUiThread {
+                    handleFullscreenToggle(2)
                 }
             }
-            
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                Log.d(TAG, "팬 슬라이더 터치 시작")
-            }
-            
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                Log.d(TAG, "팬 슬라이더 터치 종료")
-            }
-        })
-        
-        // 틸트 슬라이더 설정 (-90 ~ 90도)
-        tiltSeekBar.max = 180
-        tiltSeekBar.progress = 90   // 0도 위치 (중앙)
-        tiltValueText.text = "0°"
-        
-        tiltSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser && !isUpdatingSliders) {
-                    val tiltAngle = progress - 90  // -90 ~ 90도로 변환
-                    Log.d(TAG, "사용자 틸트 슬라이더 조작: ${tiltAngle}°")
-                    tiltValueText.text = "${tiltAngle}°"
-                    
-                    // VideoPlayerFragment에 틸트 각도 전송
-                    videoPlayerFragment?.let { fragment ->
-                        fragment.setTiltAngle(tiltAngle.toFloat())
-                    }
-                }
-            }
-            
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                Log.d(TAG, "틸트 슬라이더 터치 시작")
-            }
-            
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                Log.d(TAG, "틸트 슬라이더 터치 종료")
-            }
-        })
-        
-        // 줌 슬라이더 설정 (1.0 ~ 10.0배)
-        zoomSeekBar.max = 90
-        zoomSeekBar.progress = 0   // 1.0배 위치
-        zoomValueText.text = "1.0x"
-        
-        zoomSeekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                if (fromUser && !isUpdatingSliders) {
-                    val zoomLevel = 1.0f + (progress / 10.0f)  // 1.0 ~ 10.0배로 변환
-                    Log.d(TAG, "사용자 줌 슬라이더 조작: ${String.format("%.1f", zoomLevel)}x")
-                    zoomValueText.text = "${String.format("%.1f", zoomLevel)}x"
-                    
-                    // VideoPlayerFragment에 줌 레벨 전송
-                    videoPlayerFragment?.let { fragment ->
-                        fragment.setZoomLevel(zoomLevel)
-                    }
-                }
-            }
-            
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {
-                Log.d(TAG, "줌 슬라이더 터치 시작")
-            }
-            
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                Log.d(TAG, "줌 슬라이더 터치 종료")
-            }
-        })
-    }
-    
-    /**
-     * VideoPlayerFragment의 현재 PTZ 각도로 슬라이더 업데이트
-     */
-    private fun updatePTZSliders(pan: Float, tilt: Float, zoom: Float) {
-        Log.d(TAG, "슬라이더 업데이트: pan=${pan}°, tilt=${tilt}°, zoom=${zoom}x")
-        
-        // 프로그래밍적 업데이트 플래그 설정
-        isUpdatingSliders = true
-        
-        try {
-            // 팬 슬라이더 업데이트 (-90 ~ 90도 -> 180 ~ 0)
-            val panProgress = (90 - pan).toInt().coerceIn(0, 180)
-            if (panSeekBar.progress != panProgress) {
-                panSeekBar.progress = panProgress
-                panValueText.text = "${-pan.toInt()}°"  // 표시값만 반대로
-                Log.d(TAG, "팬 슬라이더 업데이트: ${-pan.toInt()}°")
-            }
-            
-            // 틸트 슬라이더 업데이트 (-90 ~ 90도 -> 0 ~ 180)
-            val tiltProgress = (tilt + 90).toInt().coerceIn(0, 180)
-            if (tiltSeekBar.progress != tiltProgress) {
-                tiltSeekBar.progress = tiltProgress
-                tiltValueText.text = "${tilt.toInt()}°"
-                Log.d(TAG, "틸트 슬라이더 업데이트: ${tilt.toInt()}°")
-            }
-            
-            // 줌 슬라이더 업데이트 (1.0 ~ 10.0배 -> 0 ~ 90)
-            val zoomProgress = ((zoom - 1.0f) * 10).toInt().coerceIn(0, 90)
-            if (zoomSeekBar.progress != zoomProgress) {
-                zoomSeekBar.progress = zoomProgress
-                zoomValueText.text = "${String.format("%.1f", zoom)}x"
-                Log.d(TAG, "줌 슬라이더 업데이트: ${String.format("%.1f", zoom)}x")
-            }
-        } finally {
-            // 플래그 해제
-            isUpdatingSliders = false
         }
+        videoPlayerFragment2?.setFullscreenCallback(callback2)
     }
     
-    private fun connectToStream() {
-        val url = urlEditText.text.toString().trim()
+    private fun connectToStream(playerNum: Int) {
+        val url = if (playerNum == 1) urlEditText1.text.toString().trim() else urlEditText2.text.toString().trim()
         if (url.isEmpty()) {
             Toast.makeText(this, "URL을 입력해주세요", Toast.LENGTH_SHORT).show()
             return
         }
         
         // URL을 SharedPreferences에 저장
-        prefs.edit().putString(PREF_LAST_URL, url).apply()
+        prefs.edit().putString(PREF_LAST_URL + playerNum, url).apply()
         
         // VideoPlayerFragment에 URL 전달하여 재생
-        videoPlayerFragment?.let { fragment ->
-            fragment.playRtspStream(url)
-            updateStatus("비디오 플레이어에 연결 요청됨: $url")
+        val fragment = if (playerNum == 1) videoPlayerFragment1 else videoPlayerFragment2
+        fragment?.let {
+            it.playRtspStream(url)
+            Log.d(TAG, "Player $playerNum 연결 요청: $url")
         }
     }
     
-    private fun disconnectFromStream() {
-        // VideoPlayerFragment의 연결 해제
-        videoPlayerFragment?.let { fragment ->
-            fragment.disconnectStream()
-            updateStatus("비디오 플레이어 연결 해제 요청됨")
+    private fun disconnectFromStream(playerNum: Int) {
+        val fragment = if (playerNum == 1) videoPlayerFragment1 else videoPlayerFragment2
+        fragment?.let {
+            it.disconnectStream()
+            Log.d(TAG, "Player $playerNum 연결 해제 요청")
         }
     }
     
-    private fun playStream() {
-        // VideoPlayerFragment의 재생 재개
-        videoPlayerFragment?.let { fragment ->
-            fragment.resumeStream()
-            updateStatus("비디오 재생 요청됨")
+    private fun playStream(playerNum: Int) {
+        val fragment = if (playerNum == 1) videoPlayerFragment1 else videoPlayerFragment2
+        fragment?.let {
+            it.resumeStream()
+            Log.d(TAG, "Player $playerNum 재생 요청")
         }
     }
     
-    private fun pauseStream() {
-        // VideoPlayerFragment의 일시정지
-        videoPlayerFragment?.let { fragment ->
-            fragment.pauseStream()
-            updateStatus("비디오 일시정지 요청됨")
+    private fun pauseStream(playerNum: Int) {
+        val fragment = if (playerNum == 1) videoPlayerFragment1 else videoPlayerFragment2
+        fragment?.let {
+            it.pauseStream()
+            Log.d(TAG, "Player $playerNum 일시정지 요청")
         }
     }
     
-    private fun updateStatus(message: String) {
-        val timestamp = System.currentTimeMillis() / 1000 // 초 단위로 표시
-        val statusWithTime = "[$timestamp] $message"
-        statusTextView.text = statusWithTime
-        Log.d(TAG, "상태 업데이트: $message")
+    private fun handleFullscreenToggle(playerNum: Int) {
+        Log.d(TAG, "Player $playerNum 전체화면 토글")
+        toggleFullscreenMode(playerNum)
     }
     
-    /**
-     * Fragment에서 직접 호출할 수 있는 전체화면 토글 함수
-     */
-    fun handleFullscreenToggle() {
-        Log.d(TAG, "handleFullscreenToggle() 호출됨")
-        runOnUiThread {
-            toggleFullscreenMode()
-        }
-    }
-    
-    /**
-     * 전체화면 모드 토글
-     */
-    private fun toggleFullscreenMode() {
+    private fun toggleFullscreenMode(playerNum: Int) {
         try {
-            Log.d(TAG, "전체화면 모드 토글")
+            Log.d(TAG, "Player $playerNum 전체화면 모드 토글")
 
             if (isFullscreenMode) {
                 // 전체화면 모드 해제
@@ -518,14 +373,11 @@ class H265DemoActivity : AppCompatActivity() {
                     @Suppress("DEPRECATION")
                     window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
                 }
-                supportActionBar?.show()  // 액션바 다시 표시
-                updateStatus("전체화면 모드 해제")
-
-                // Fragment 컨테이너를 원래 크기로 복원
+                supportActionBar?.show()
                 restoreNormalLayout()
                 isFullscreenMode = false
             } else {
-                // 전체화면 모드 설정 - 화면 회전과 동일한 효과
+                // 전체화면 모드 설정
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     window.insetsController?.let { controller ->
                         controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
@@ -540,24 +392,20 @@ class H265DemoActivity : AppCompatActivity() {
                             or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                             or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
                 }
-                supportActionBar?.hide()  // 액션바 숨기기
-                updateStatus("전체화면 모드 활성화")
-
-                // Fragment 컨테이너를 전체화면 크기로 확장
+                supportActionBar?.hide()
                 expandToFullscreen()
                 isFullscreenMode = true
             }
 
         } catch (e: Exception) {
             Log.e(TAG, "전체화면 모드 토글 실패", e)
-            updateStatus("전체화면 모드 토글 실패: ${e.message}")
         }
     }
     
     private fun expandToFullscreen() {
         try {
             Log.d(TAG, "expandToFullscreen() 함수 시작")
-            val videoContainer = findViewById<View>(R.id.video_player_container)
+            val videoContainer = findViewById<View>(R.id.video_player_container1)
             
             // 현재 화면 방향 확인
             val orientation = resources.configuration.orientation
@@ -565,16 +413,16 @@ class H265DemoActivity : AppCompatActivity() {
             
             // Activity의 UI 요소들만 숨기기 (Fragment는 유지)
             val elementsToHide = listOf(
-                R.id.url_edit_text,
-                R.id.connect_button,
-                R.id.disconnect_button,
-                R.id.play_button,
-                R.id.pause_button,
-                R.id.pan_seek_bar,
-                R.id.tilt_seek_bar,
-                R.id.zoom_seek_bar,
-                R.id.status_text_view,
-                R.id.version_text_view
+                R.id.url_edit_text1,
+                R.id.connect_button1,
+                R.id.disconnect_button1,
+                R.id.play_button1,
+                R.id.pause_button1,
+                R.id.url_edit_text2,
+                R.id.connect_button2,
+                R.id.disconnect_button2,
+                R.id.play_button2,
+                R.id.pause_button2
             )
             
             elementsToHide.forEach { id ->
@@ -639,84 +487,8 @@ class H265DemoActivity : AppCompatActivity() {
                 }
             }
             
-            // 가로모드에서 추가 처리
-            if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
-                Log.d(TAG, "가로모드 추가 처리 시작")
-                
-                // 가로모드에서는 높이를 화면 높이로 강제 설정
-                val displayMetrics = resources.displayMetrics
-                val screenHeight = displayMetrics.heightPixels
-                Log.d(TAG, "화면 높이: ${screenHeight}")
-                
-                // ScrollView와 LinearLayout의 높이를 화면 높이로 강제 설정
-                scrollView?.let { sv ->
-                    val scrollParams = sv.layoutParams
-                    scrollParams.height = screenHeight
-                    sv.layoutParams = scrollParams
-                    Log.d(TAG, "ScrollView 높이를 화면 높이로 강제 설정: ${screenHeight}")
-                }
-                
-                linearLayout?.let { ll ->
-                    val linearParams = ll.layoutParams
-                    linearParams.height = screenHeight
-                    ll.layoutParams = linearParams
-                    Log.d(TAG, "LinearLayout 높이를 화면 높이로 강제 설정: ${screenHeight}")
-                }
-                
-                // 비디오 컨테이너도 화면 높이로 설정
-                val containerParams = videoContainer.layoutParams
-                containerParams.height = screenHeight
-                videoContainer.layoutParams = containerParams
-                Log.d(TAG, "비디오 컨테이너 높이를 화면 높이로 강제 설정: ${screenHeight}")
-            }
-            
-            // 강제로 레이아웃 다시 계산
-            scrollView?.requestLayout()
-            linearLayout?.requestLayout()
-            videoContainer.requestLayout()
-            Log.d(TAG, "레이아웃 강제 재계산 요청")
-            
-            // 모든 부모 뷰의 패딩과 마진 제거 (화면 회전과 동일한 효과)
-            var parent = videoContainer.parent
-            while (parent is ViewGroup) {
-                parent.setPadding(0, 0, 0, 0)
-                parent.clipToPadding = false
-                parent.clipChildren = false
-                Log.d(TAG, "부모 뷰 패딩 제거: ${parent.javaClass.simpleName}")
-                parent = parent.parent
-            }
-            
-            // Activity의 루트 뷰 패딩도 제거
-            findViewById<View>(android.R.id.content)?.setPadding(0, 0, 0, 0)
-            window.decorView.setPadding(0, 0, 0, 0)
-            
-            // 추가: 화면 회전과 동일한 레이아웃 효과 적용
-            val rootView = findViewById<View>(android.R.id.content)
-            rootView?.let { view ->
-                if (view is ViewGroup) {
-                    view.clipToPadding = false
-                    view.clipChildren = false
-                }
-            }
-            
-            // Activity 크기 로그 출력 (즉시)
-            val activityRoot = findViewById<View>(android.R.id.content)
-            activityRoot?.let { root ->
-                Log.d(TAG, "Activity 루트 크기 - 너비: ${root.width}, 높이: ${root.height}")
-            }
-            
-            // 화면 크기 로그 출력 (즉시)
-            val displayMetrics = resources.displayMetrics
-            Log.d(TAG, "화면 크기 - 너비: ${displayMetrics.widthPixels}, 높이: ${displayMetrics.heightPixels}")
-            
-            // 비디오 컨테이너 크기 로그 출력 (즉시)
-            val containerView = findViewById<View>(R.id.video_player_container)
-            containerView?.let { container ->
-                Log.d(TAG, "비디오 컨테이너 크기 - 너비: ${container.width}, 높이: ${container.height}")
-            }
-            
             // VideoPlayerFragment에 전체화면 모드 알림
-            videoPlayerFragment?.let { fragment ->
+            videoPlayerFragment1?.let { fragment ->
                 // Fragment의 비디오 비율 조정을 강제로 호출
                 fragment.adjustVideoAspectRatioForFullscreen()
                 
@@ -750,27 +522,26 @@ class H265DemoActivity : AppCompatActivity() {
         }
     }
     
-
-    
     /**
      * Fragment를 원래 크기로 복원
      */
     private fun restoreNormalLayout() {
         try {
-            val videoContainer = findViewById<View>(R.id.video_player_container)
+            val videoContainer1 = findViewById<View>(R.id.video_player_container1)
+            val videoContainer2 = findViewById<View>(R.id.video_player_container2)
             
             // Activity의 UI 요소들을 다시 표시
             val elementsToShow = listOf(
-                R.id.url_edit_text,
-                R.id.connect_button,
-                R.id.disconnect_button,
-                R.id.play_button,
-                R.id.pause_button,
-                R.id.pan_seek_bar,
-                R.id.tilt_seek_bar,
-                R.id.zoom_seek_bar,
-                R.id.status_text_view,
-                R.id.version_text_view
+                R.id.url_edit_text1,
+                R.id.connect_button1,
+                R.id.disconnect_button1,
+                R.id.play_button1,
+                R.id.pause_button1,
+                R.id.url_edit_text2,
+                R.id.connect_button2,
+                R.id.disconnect_button2,
+                R.id.play_button2,
+                R.id.pause_button2
             )
             
             elementsToShow.forEach { id ->
@@ -778,31 +549,27 @@ class H265DemoActivity : AppCompatActivity() {
             }
             
             // 비디오 컨테이너를 원래 크기로 복원
-            val layoutParams = videoContainer.layoutParams as? LinearLayout.LayoutParams
-            layoutParams?.let { params ->
+            val layoutParams1 = videoContainer1.layoutParams as? LinearLayout.LayoutParams
+            layoutParams1?.let { params ->
                 params.width = ViewGroup.LayoutParams.MATCH_PARENT
                 params.height = 0  // weight를 사용하는 경우
                 params.weight = 1.0f  // 원래 weight 값으로 복원
-                videoContainer.layoutParams = params
+                videoContainer1.layoutParams = params
+            }
+            
+            val layoutParams2 = videoContainer2.layoutParams as? LinearLayout.LayoutParams
+            layoutParams2?.let { params ->
+                params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                params.height = 0  // weight를 사용하는 경우
+                params.weight = 1.0f  // 원래 weight 값으로 복원
+                videoContainer2.layoutParams = params
             }
             
             // Fragment 컨테이너의 패딩도 복원
-            videoContainer.setPadding(0, 0, 0, 0)
+            videoContainer1.setPadding(0, 0, 0, 0)
+            videoContainer2.setPadding(0, 0, 0, 0)
             
-            // 부모 뷰들의 패딩 복원
-            var parent = videoContainer.parent
-            while (parent is ViewGroup) {
-                parent.setPadding(0, 0, 0, 0)
-                parent.clipToPadding = true
-                parent.clipChildren = true
-                parent = parent.parent
-            }
-            
-            // Activity의 루트 뷰 패딩 복원
-            findViewById<View>(android.R.id.content)?.setPadding(0, 0, 0, 0)
-            window.decorView.setPadding(0, 0, 0, 0)
-            
-            Log.d(TAG, "Fragment 원래 크기 복원 완료 (테두리 복원)")
+            Log.d(TAG, "Fragment 원래 크기 복원 완료")
             
         } catch (e: Exception) {
             Log.e(TAG, "Fragment 원래 크기 복원 실패", e)
@@ -813,4 +580,4 @@ class H265DemoActivity : AppCompatActivity() {
         super.onDestroy()
         Log.d(TAG, "액티비티 종료 - 리소스 해제 완료")
     }
-} 
+}
