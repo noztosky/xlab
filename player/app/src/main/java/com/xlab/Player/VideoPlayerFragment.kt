@@ -1,5 +1,6 @@
 package com.xlab.Player
 
+// Build: 7
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
@@ -11,14 +12,42 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
+import android.app.Activity
+import android.os.Build
+import androidx.appcompat.app.AppCompatActivity
+import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.widget.LinearLayout
+import android.widget.EditText
+import android.widget.TextView
 
 /**
  * 비디오 플레이어 Fragment (순수 비디오 플레이어만 포함)
  */
 class VideoPlayerFragment : Fragment() {
     
+    private lateinit var urlEditText: EditText
+    private lateinit var connectButton: Button
+    private lateinit var disconnectButton: Button
+    private lateinit var fullscreenButton: Button
+    private lateinit var surfaceView: SurfaceView
+    private lateinit var ptzController: C12PTZController
+    private lateinit var statusText: TextView
+    private var xlabPlayer: XlabPlayer? = null
+    private var videoUrl: String = ""
+    private var isFullscreenMode = false
+    private var originalFragmentLayoutParams: ViewGroup.LayoutParams? = null
+    private var originalFragmentParentLayoutParams: ViewGroup.LayoutParams? = null
+    private var originalFragmentPadding = intArrayOf(0, 0, 0, 0)
+    private var originalParentPadding = intArrayOf(0, 0, 0, 0)
+    private var originalParentStates = mutableListOf<Pair<ViewGroup, IntArray>>()
+    private var originalOtherContainerVisibility = View.VISIBLE
+    private var originalSurfaceViewSize = intArrayOf(0, 0)  // width, height
+    private var originalSurfaceViewLayoutParams: ViewGroup.LayoutParams? = null
+    
     companion object {
         private const val TAG = "VideoPlayerFragment"
+        private const val FULLSCREEN_TAG = "FULLSCREEN_STATE"  // 전체화면 전용 로그 태그
         private const val PREFS_NAME = "VideoPlayerPrefs"
         private const val PREF_BUFFER_TIME = "buffer_time"
         private const val DEFAULT_BUFFER_TIME = 0  // 기본 0초
@@ -51,8 +80,6 @@ class VideoPlayerFragment : Fragment() {
         fun onToggleFullscreen()
     }
     
-    private var xlabPlayer: XlabPlayer? = null
-    private lateinit var surfaceView: SurfaceView
     private var playerStateCallback: PlayerStateCallback? = null
     private var ptzControlCallback: PTZControlCallback? = null
     private var fullscreenCallback: FullscreenCallback? = null
@@ -82,12 +109,6 @@ class VideoPlayerFragment : Fragment() {
     private lateinit var homeButton: Button
     private lateinit var recordButton: Button
     private lateinit var photoButton: Button
-    
-    // 전체화면 버튼
-    private lateinit var fullscreenButton: Button
-    
-    // 전체화면 상태 추적
-    private var isFullscreenMode = false
     
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -167,7 +188,7 @@ class VideoPlayerFragment : Fragment() {
                 // Fragment의 크기 로그 출력
                 fragmentView.post {
                     Log.d(TAG, "Fragment 크기 - 너비: ${fragmentView.width}, 높이: ${fragmentView.height}")
-                    Log.d(TAG, "Fragment 레이아웃 파라미터 - 너비: ${rootParams.width}, 높이: ${rootParams.height}")
+                    Log.d(TAG, "Fragment 레이아웃 파라미터 - 너비: ${rootParams?.width}, 높이: ${rootParams?.height}")
                 }
             }
             
@@ -419,77 +440,750 @@ class VideoPlayerFragment : Fragment() {
      * 전체화면 버튼 설정
      */
     private fun setupFullscreenButton() {
+        Log.d(TAG, "전체화면 버튼 설정 시작")
+        
+        // 버튼이 null인지 확인
+        if (fullscreenButton == null) {
+            Log.e(TAG, "전체화면 버튼이 null입니다!")
+            return
+        }
+        
+        Log.d(TAG, "전체화면 버튼 찾음: ${fullscreenButton.id}")
+        
         fullscreenButton.setOnTouchListener { button, event ->
+            Log.d(TAG, "전체화면 버튼 터치 이벤트: ${event.action}")
+            
             when (event.action) {
                 android.view.MotionEvent.ACTION_DOWN -> {
+                    Log.d(TAG, "전체화면 버튼 ACTION_DOWN")
                     button.setBackgroundResource(R.drawable.button_pressed_blue)
                     true
                 }
                 android.view.MotionEvent.ACTION_UP -> {
+                    Log.d(TAG, "전체화면 버튼 ACTION_UP")
                     button.setBackgroundResource(R.drawable.button_background_10_percent_black)
                     Log.d(TAG, "전체화면 버튼 터치업")
                     toggleFullscreen()
                     true
                 }
                 android.view.MotionEvent.ACTION_CANCEL -> {
+                    Log.d(TAG, "전체화면 버튼 ACTION_CANCEL")
                     button.setBackgroundResource(R.drawable.button_background_10_percent_black)
                     true
                 }
-                else -> false
+                else -> {
+                    Log.d(TAG, "전체화면 버튼 기타 이벤트: ${event.action}")
+                    false
+                }
             }
+        }
+        
+        Log.d(TAG, "전체화면 버튼 설정 완료")
+    }
+    
+    /**
+     * 전체화면 토글 (RTSP 플레이어 내부 토글)
+     */
+    private fun toggleFullscreen() {
+        try {
+            Log.d(TAG, "RTSP 플레이어 전체화면 토글 - 현재 상태: $isFullscreenMode")
+            
+            val activity = activity ?: return
+            
+            if (!isFullscreenMode) {
+                Log.d(TAG, "전체화면 모드로 전환")
+                enterFullscreen(activity)
+            } else {
+                Log.d(TAG, "일반 모드로 전환")
+                exitFullscreen(activity)
+            }
+            
+            // 전체화면 버튼 아이콘 업데이트 (선택사항)
+            updateFullscreenButtonIcon()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "RTSP 플레이어 전체화면 토글 실패", e)
         }
     }
     
     /**
-     * 전체화면 토글
+     * RTSP 플레이어 전체화면 진입
      */
-    private fun toggleFullscreen() {
+    private fun enterFullscreen(activity: Activity) {
         try {
-            Log.d(TAG, "전체화면 토글")
+            // 1. 원본 상태들 저장
+            saveOriginalStates()
             
-            // 전체화면 상태 토글
-            isFullscreenMode = !isFullscreenMode
+            // 2. 시스템 UI 숨기기 (상태바, 네비게이션바)
+            hideSystemUI(activity)
             
-            // 전체화면 버튼 위치 업데이트
-            updateFullscreenButtonPosition()
+            // 3. ActionBar 숨기기
+            (activity as? AppCompatActivity)?.supportActionBar?.hide()
             
-            // 비디오 비율 조정 (화면 회전과 동일한 효과)
-            adjustVideoAspectRatio()
+            // 4. Activity의 다른 UI 요소들 숨기기 (다른 플레이어, 버튼들)
+            hideActivityElements()
             
-            // 부모 액티비티에 전체화면 모드 전환 요청
-            Log.d(TAG, "전체화면 콜백 상태 확인: ${fullscreenCallback != null}")
-            Log.d(TAG, "전체화면 콜백 객체 타입: ${fullscreenCallback?.javaClass?.simpleName}")
-            fullscreenCallback?.let { callback ->
-                Log.d(TAG, "전체화면 콜백 호출 시작")
-                try {
-                    Log.d(TAG, "콜백 함수 호출 직전")
-                    
-                    callback.onToggleFullscreen()
-                    
-                    Log.d(TAG, "콜백 함수 호출 직후")
-                    Log.d(TAG, "전체화면 콜백 호출 완료")
-                } catch (e: Exception) {
-                    Log.e(TAG, "전체화면 콜백 호출 실패", e)
-                }
-            } ?: run {
-                Log.w(TAG, "전체화면 콜백이 설정되지 않음")
+            // 5. 현재 Fragment를 전체화면으로 확장
+            expandFragmentToFullscreen()
+            
+            // 6. 비디오 SurfaceView를 전체화면에 맞게 조정
+            view?.post {
+                adjustSurfaceViewStyle(true)
+            }
+            
+            isFullscreenMode = true
+            
+        } catch (e: Exception) {
+            Log.e(FULLSCREEN_TAG, "RTSP 플레이어 전체화면 진입 실패", e)
+        }
+    }
+    
+    /**
+     * RTSP 플레이어 전체화면 해제
+     */
+    private fun exitFullscreen(activity: Activity) {
+        try {
+            // 1. 시스템 UI 복원 (상태바, 네비게이션바)
+            showSystemUI(activity)
+            
+            // 2. ActionBar 복원
+            (activity as? AppCompatActivity)?.supportActionBar?.show()
+            
+            // 3. Activity의 다른 UI 요소들 복원
+            showActivityElements()
+            
+            // 4. Fragment를 원래 크기로 복원
+            restoreFragmentSize()
+            
+            // 5. 비디오 SurfaceView를 일반 모드에 맞게 조정
+            view?.post {
+                adjustSurfaceViewStyle(false)
+            }
+            
+            isFullscreenMode = false
+            
+        } catch (e: Exception) {
+            Log.e(FULLSCREEN_TAG, "RTSP 플레이어 전체화면 해제 실패", e)
+        }
+    }
+    
+    /**
+     * 원본 상태들 저장 (수정된 버전)
+     */
+    private fun saveOriginalStates() {
+        try {
+            val fragmentView = view ?: return
+            val parent = fragmentView.parent as? ViewGroup ?: return
+            
+            // Fragment Container의 원본 레이아웃 파라미터 저장
+            val containerParams = parent.layoutParams
+            if (containerParams is LinearLayout.LayoutParams) {
+                Log.d(FULLSCREEN_TAG, "전체화면 전 Container - width: ${containerParams.width}, height: ${containerParams.height}, weight: ${containerParams.weight}")
+            }
+            originalFragmentParentLayoutParams = when (containerParams) {
+                is LinearLayout.LayoutParams -> LinearLayout.LayoutParams(containerParams)
+                is FrameLayout.LayoutParams -> FrameLayout.LayoutParams(containerParams)
+                else -> containerParams
+            }
+            
+            // Fragment 자체의 원본 레이아웃 파라미터 저장
+            val fragmentParams = fragmentView.layoutParams
+            if (fragmentParams != null) {
+                Log.d(FULLSCREEN_TAG, "전체화면 전 Fragment - width: ${fragmentParams.width}, height: ${fragmentParams.height}")
+            }
+            originalFragmentLayoutParams = when (fragmentParams) {
+                is FrameLayout.LayoutParams -> FrameLayout.LayoutParams(fragmentParams)
+                is LinearLayout.LayoutParams -> LinearLayout.LayoutParams(fragmentParams)
+                else -> fragmentParams
+            }
+            
+            // SurfaceView 원본 크기 저장
+            originalSurfaceViewSize[0] = surfaceView.width
+            originalSurfaceViewSize[1] = surfaceView.height
+            Log.d(FULLSCREEN_TAG, "전체화면 전 SurfaceView 크기: ${originalSurfaceViewSize[0]}x${originalSurfaceViewSize[1]}")
+            
+            // SurfaceView 원본 레이아웃 파라미터 저장
+            originalSurfaceViewLayoutParams = when (surfaceView.layoutParams) {
+                is FrameLayout.LayoutParams -> FrameLayout.LayoutParams(surfaceView.layoutParams as FrameLayout.LayoutParams)
+                is LinearLayout.LayoutParams -> LinearLayout.LayoutParams(surfaceView.layoutParams as LinearLayout.LayoutParams)
+                else -> surfaceView.layoutParams
+            }
+            Log.d(FULLSCREEN_TAG, "전체화면 전 SurfaceView 레이아웃 파라미터: width=${originalSurfaceViewLayoutParams?.width}, height=${originalSurfaceViewLayoutParams?.height}")
+            
+            // Fragment와 Container의 원본 패딩 저장
+            originalFragmentPadding = intArrayOf(
+                fragmentView.paddingLeft, fragmentView.paddingTop,
+                fragmentView.paddingRight, fragmentView.paddingBottom
+            )
+            
+            originalParentPadding = intArrayOf(
+                parent.paddingLeft, parent.paddingTop,
+                parent.paddingRight, parent.paddingBottom
+            )
+            
+            // 다른 Fragment 컨테이너의 가시성 저장
+            val activity = requireActivity()
+            val container1 = activity.findViewById<View>(R.id.video_player_container1)
+            val container2 = activity.findViewById<View>(R.id.video_player_container2)
+            
+            // 현재 전체화면이 되는 컨테이너가 아닌 다른 컨테이너 숨기기
+            if (parent.id == R.id.video_player_container1) {
+                originalOtherContainerVisibility = container2?.visibility ?: View.VISIBLE
+            } else if (parent.id == R.id.video_player_container2) {
+                originalOtherContainerVisibility = container1?.visibility ?: View.VISIBLE
+            }
+            
+            // 상위 ViewGroup들의 패딩 저장
+            originalParentStates.clear()
+            var currentParent = parent.parent as? ViewGroup
+            var depth = 0
+            while (currentParent != null && currentParent.id != android.R.id.content && depth < 5) {
+                val padding = intArrayOf(
+                    currentParent.paddingLeft, currentParent.paddingTop,
+                    currentParent.paddingRight, currentParent.paddingBottom
+                )
+                originalParentStates.add(Pair(currentParent, padding))
+                currentParent = currentParent.parent as? ViewGroup
+                depth++
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "전체화면 토글 실패", e)
+            Log.e(FULLSCREEN_TAG, "원본 상태 저장 실패", e)
+        }
+    }
+    
+    /**
+     * 시스템 UI 숨기기 (수정된 버전)
+     */
+    private fun hideSystemUI(activity: Activity) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                activity.window.insetsController?.let { controller ->
+                    controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+                    controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                activity.window.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                    View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                )
+            }
+            Log.d(TAG, "시스템 UI 숨김 완료")
+        } catch (e: Exception) {
+            Log.e(TAG, "시스템 UI 숨기기 실패", e)
+        }
+    }
+    
+    /**
+     * 시스템 UI 복원 (수정된 버전)
+     */
+    private fun showSystemUI(activity: Activity) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                activity.window.insetsController?.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
+            } else {
+                @Suppress("DEPRECATION")
+                activity.window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
+            }
+            Log.d(TAG, "시스템 UI 복원 완료")
+        } catch (e: Exception) {
+            Log.e(TAG, "시스템 UI 복원 실패", e)
+        }
+    }
+    
+    /**
+     * Activity UI 요소들 숨기기 (수정된 버전)
+     */
+    private fun hideActivityElements() {
+        try {
+            val activity = activity ?: return
+            
+            // 모든 컨트롤 UI 요소들 숨기기
+            val uiElementIds = listOf(
+                R.id.url_edit_text1, R.id.connect_button1, R.id.disconnect_button1,
+                R.id.play_button1, R.id.pause_button1,
+                R.id.url_edit_text2, R.id.connect_button2, R.id.disconnect_button2,
+                R.id.play_button2, R.id.pause_button2
+            )
+            
+            uiElementIds.forEach { id ->
+                activity.findViewById<View>(id)?.visibility = View.GONE
+            }
+            
+            // 현재 전체화면이 되지 않는 다른 Fragment 컨테이너 숨기기
+            val currentContainer = view?.parent as? ViewGroup
+            when (currentContainer?.id) {
+                R.id.video_player_container1 -> {
+                    // Player 1이 전체화면이면 Player 2 컨테이너 숨기기
+                    activity.findViewById<View>(R.id.video_player_container2)?.visibility = View.GONE
+                }
+                R.id.video_player_container2 -> {
+                    // Player 2가 전체화면이면 Player 1 컨테이너 숨기기  
+                    activity.findViewById<View>(R.id.video_player_container1)?.visibility = View.GONE
+                }
+            }
+            
+            Log.d(TAG, "Activity UI 요소들 숨김 완료")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Activity UI 요소 숨기기 실패", e)
+        }
+    }
+    
+    /**
+     * Activity UI 요소들 복원 (수정된 버전)
+     */
+    private fun showActivityElements() {
+        try {
+            Log.d(FULLSCREEN_TAG, "showActivityElements() 시작")
+            val activity = activity ?: run {
+                Log.e(FULLSCREEN_TAG, "activity가 null입니다!")
+                return
+            }
+            Log.d(FULLSCREEN_TAG, "activity 확인 완료")
+            
+            // 모든 컨트롤 UI 요소들 복원
+            val uiElementIds = listOf(
+                R.id.url_edit_text1, R.id.connect_button1, R.id.disconnect_button1,
+                R.id.play_button1, R.id.pause_button1,
+                R.id.url_edit_text2, R.id.connect_button2, R.id.disconnect_button2,
+                R.id.play_button2, R.id.pause_button2
+            )
+            
+            Log.d(FULLSCREEN_TAG, "UI 요소들 가시성 복원 시작")
+            uiElementIds.forEach { id ->
+                activity.findViewById<View>(id)?.visibility = View.VISIBLE
+            }
+            Log.d(FULLSCREEN_TAG, "UI 요소들 가시성 복원 완료")
+            
+            // 양쪽 Fragment 컨테이너 모두 복원
+            Log.d(FULLSCREEN_TAG, "Container 찾기 시작")
+            val container1 = activity.findViewById<ViewGroup>(R.id.video_player_container1)
+            val container2 = activity.findViewById<ViewGroup>(R.id.video_player_container2)
+            Log.d(FULLSCREEN_TAG, "Container1: ${container1?.javaClass?.simpleName}, Container2: ${container2?.javaClass?.simpleName}")
+            
+            Log.d(FULLSCREEN_TAG, "Container들 복원 시작")
+            
+            container1?.let { 
+                it.visibility = View.VISIBLE
+                Log.d(FULLSCREEN_TAG, "Container1 가시성 복원")
+                
+                // Container1의 부모 LinearLayout에서 weight 설정
+                val parent1 = it.parent as? LinearLayout
+                if (parent1 != null) {
+                    Log.d(FULLSCREEN_TAG, "Container1의 부모 LinearLayout 발견")
+                    // Container1은 원본 weight가 0.0이므로 그대로 유지
+                    Log.d(FULLSCREEN_TAG, "Container1 weight는 이미 복원됨")
+                } else {
+                    Log.w(FULLSCREEN_TAG, "Container1의 부모가 LinearLayout이 아닙니다! 부모 타입: ${it.parent?.javaClass?.simpleName}")
+                }
+            }
+            
+            container2?.let { 
+                it.visibility = originalOtherContainerVisibility
+                Log.d(FULLSCREEN_TAG, "Container2 가시성 복원: $originalOtherContainerVisibility")
+                
+                // Container2의 부모 LinearLayout에서 weight 설정
+                val parent2 = it.parent as? LinearLayout
+                if (parent2 != null) {
+                    Log.d(FULLSCREEN_TAG, "Container2의 부모 LinearLayout 발견")
+                    // Container2는 원래 1.0f였으므로 복원
+                    Log.d(FULLSCREEN_TAG, "Container2 weight는 이미 복원됨")
+                } else {
+                    Log.w(FULLSCREEN_TAG, "Container2의 부모가 LinearLayout이 아닙니다! 부모 타입: ${it.parent?.javaClass?.simpleName}")
+                }
+            }
+            
+            Log.d(TAG, "Activity UI 요소들 복원 완료")
+            
+        } catch (e: Exception) {
+            Log.e(FULLSCREEN_TAG, "Activity UI 요소 복원 실패", e)
+            e.printStackTrace()
+        }
+    }
+    
+    /**
+     * Fragment를 전체화면으로 확장 (수정된 버전)
+     */
+    private fun expandFragmentToFullscreen() {
+        try {
+            Log.d(FULLSCREEN_TAG, "expandFragmentToFullscreen() 시작")
+            
+            val fragmentView = view ?: run {
+                Log.e(FULLSCREEN_TAG, "fragmentView가 null입니다!")
+                return
+            }
+            Log.d(FULLSCREEN_TAG, "fragmentView 확인 완료")
+            
+            val parent = fragmentView.parent as? ViewGroup ?: run {
+                Log.e(FULLSCREEN_TAG, "parent ViewGroup이 null입니다!")
+                return
+            }
+            Log.d(FULLSCREEN_TAG, "parent ViewGroup 확인 완료: ${parent.javaClass.simpleName}")
+            
+            Log.d(FULLSCREEN_TAG, "전체화면 확장 시작")
+            
+            // Activity의 메인 컨테이너 찾기 (LinearLayout)
+            Log.d(FULLSCREEN_TAG, "Activity 찾기 시작")
+            val activity = requireActivity()
+            Log.d(FULLSCREEN_TAG, "Activity 찾기 완료: ${activity.javaClass.simpleName}")
+            
+            Log.d(FULLSCREEN_TAG, "메인 컨테이너 찾기 시작")
+            val contentView = activity.findViewById<ViewGroup>(android.R.id.content)
+            Log.d(FULLSCREEN_TAG, "content 뷰 타입: ${contentView?.javaClass?.simpleName}")
+            val mainContainer = contentView?.getChildAt(0) as? ViewGroup
+            Log.d(FULLSCREEN_TAG, "메인 컨테이너 찾기 완료: ${mainContainer?.javaClass?.simpleName}")
+            
+            // 현재 Fragment의 container 찾기
+            Log.d(FULLSCREEN_TAG, "parent.id: ${parent.id}")
+            Log.d(FULLSCREEN_TAG, "R.id.video_player_container1: ${R.id.video_player_container1}")
+            Log.d(FULLSCREEN_TAG, "R.id.video_player_container2: ${R.id.video_player_container2}")
+            
+            val currentContainer = when {
+                parent.id == R.id.video_player_container1 -> {
+                    Log.d(FULLSCREEN_TAG, "container1로 식별됨")
+                    parent
+                }
+                parent.id == R.id.video_player_container2 -> {
+                    Log.d(FULLSCREEN_TAG, "container2로 식별됨")
+                    parent
+                }
+                else -> {
+                    Log.d(FULLSCREEN_TAG, "기타 container로 처리됨")
+                    parent
+                }
+            }
+            
+            Log.d(TAG, "현재 컨테이너 ID: ${currentContainer.id}")
+            
+            // Fragment Container를 전체화면으로 확장
+            Log.d(FULLSCREEN_TAG, "Container 레이아웃 파라미터 확인 시작")
+            val containerParams = currentContainer.layoutParams
+            Log.d(FULLSCREEN_TAG, "containerParams: ${containerParams?.javaClass?.simpleName}")
+            
+            if (containerParams != null) {
+                Log.d(FULLSCREEN_TAG, "containerParams가 null이 아닙니다. 처리 시작")
+                // 원본 저장
+                originalFragmentParentLayoutParams = when (containerParams) {
+                    is LinearLayout.LayoutParams -> LinearLayout.LayoutParams(containerParams)
+                    is FrameLayout.LayoutParams -> FrameLayout.LayoutParams(containerParams)
+                    else -> containerParams
+                }
+                
+                // 전체화면으로 설정
+                Log.d(FULLSCREEN_TAG, "전체화면 설정 전 Container - width: ${containerParams.width}, height: ${containerParams.height}")
+                
+                containerParams.width = ViewGroup.LayoutParams.MATCH_PARENT
+                containerParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+                
+                Log.d(FULLSCREEN_TAG, "전체화면 설정 후 Container - width: ${containerParams.width}, height: ${containerParams.height}")
+                
+                // LinearLayout.LayoutParams인 경우에만 weight와 margins 설정
+                if (containerParams is LinearLayout.LayoutParams) {
+                    Log.d(FULLSCREEN_TAG, "LinearLayout.LayoutParams 처리 - 기존 weight: ${containerParams.weight}")
+                    containerParams.weight = 0f
+                    containerParams.setMargins(0, 0, 0, 0)
+                    Log.d(FULLSCREEN_TAG, "LinearLayout.LayoutParams 처리 완료 - 새 weight: ${containerParams.weight}, 마진: 0,0,0,0")
+                } else if (containerParams is ViewGroup.MarginLayoutParams) {
+                    Log.d(FULLSCREEN_TAG, "MarginLayoutParams 처리 - 마진을 0,0,0,0으로 설정")
+                    containerParams.setMargins(0, 0, 0, 0)
+                }
+                
+                currentContainer.layoutParams = containerParams
+                Log.d(FULLSCREEN_TAG, "Container 레이아웃 파라미터 적용 완료")
+                
+                Log.d(FULLSCREEN_TAG, "Container 전체화면으로 설정 완료")
+            } else {
+                Log.e(FULLSCREEN_TAG, "containerParams가 null입니다!")
+            }
+            
+            // Fragment 자체를 전체화면으로 설정
+            val fragmentParams = fragmentView.layoutParams as? ViewGroup.LayoutParams
+            if (fragmentParams != null) {
+                // 원본 저장
+                originalFragmentLayoutParams = when (fragmentParams) {
+                    is FrameLayout.LayoutParams -> FrameLayout.LayoutParams(fragmentParams)
+                    is LinearLayout.LayoutParams -> LinearLayout.LayoutParams(fragmentParams)
+                    else -> fragmentParams
+                }
+                
+                // 전체화면으로 설정
+                Log.d(FULLSCREEN_TAG, "전체화면 설정 전 Fragment - width: ${fragmentParams.width}, height: ${fragmentParams.height}")
+                
+                fragmentParams.width = ViewGroup.LayoutParams.MATCH_PARENT
+                fragmentParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+                fragmentView.layoutParams = fragmentParams
+                
+                Log.d(FULLSCREEN_TAG, "전체화면 설정 후 Fragment - width: ${fragmentParams.width}, height: ${fragmentParams.height}")
+                
+                Log.d(TAG, "Fragment 전체화면으로 설정 완료")
+            }
+            
+            // 모든 여백 제거
+            fragmentView.setPadding(0, 0, 0, 0)
+            currentContainer.setPadding(0, 0, 0, 0)
+            
+            // Activity의 루트 뷰부터 시작해서 모든 패딩과 마진 제거
+            val currentActivity = requireActivity()
+            val rootView = currentActivity.findViewById<ViewGroup>(android.R.id.content)
+            rootView?.setPadding(0, 0, 0, 0)
+            
+            // DecorView도 패딩 제거
+            val decorView = currentActivity.window.decorView as? ViewGroup
+            decorView?.setPadding(0, 0, 0, 0)
+            
+            // 부모들의 여백도 모두 제거
+            var parentView: ViewGroup? = currentContainer.parent as? ViewGroup
+            var depth = 0
+            while (parentView != null && depth < 10) {
+                Log.d(TAG, "패딩 제거 중: ${parentView.javaClass.simpleName} (ID: ${parentView.id})")
+                
+                // 패딩 제거
+                parentView.setPadding(0, 0, 0, 0)
+                
+                // 마진 제거
+                val parentLayoutParams = parentView.layoutParams
+                if (parentLayoutParams is ViewGroup.MarginLayoutParams) {
+                    parentLayoutParams.setMargins(0, 0, 0, 0)
+                    parentView.layoutParams = parentLayoutParams
+                }
+                
+                // 만약 이 뷰가 LinearLayout이라면 자식들의 weight도 조정
+                if (parentView is LinearLayout) {
+                    for (i in 0 until parentView.childCount) {
+                        val child = parentView.getChildAt(i)
+                        val childParams = child.layoutParams
+                        if (childParams is LinearLayout.LayoutParams && child == currentContainer) {
+                            childParams.weight = 1.0f
+                            childParams.width = ViewGroup.LayoutParams.MATCH_PARENT
+                            childParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+                            child.layoutParams = childParams
+                        }
+                    }
+                }
+                
+                // 다음 부모로 이동
+                if (parentView.id == android.R.id.content) break
+                parentView = parentView.parent as? ViewGroup
+                depth++
+            }
+            
+            // 레이아웃 갱신
+            currentContainer.requestLayout()
+            fragmentView.requestLayout()
+            
+            Log.d(TAG, "전체화면 확장 완료")
+            
+        } catch (e: Exception) {
+            Log.e(FULLSCREEN_TAG, "전체화면 확장 실패", e)
+            e.printStackTrace()
+        }
+    }
+
+    /**
+     * Fragment 크기 복원 (수정된 버전)
+     */
+    private fun restoreFragmentSize() {
+        try {
+            val fragmentView = view ?: return
+            val parent = fragmentView.parent as? ViewGroup ?: return
+            
+            Log.d(FULLSCREEN_TAG, "========== 원래 크기로 복원 시작 ==========")
+            
+            // Fragment 컨테이너 복원
+            originalFragmentParentLayoutParams?.let { originalParams ->
+                Log.d(FULLSCREEN_TAG, "Container 복원 시작 - 원본 타입: ${originalParams.javaClass.simpleName}")
+                
+                // 타입 안전성을 위해 캐스팅
+                when (originalParams) {
+                    is LinearLayout.LayoutParams -> {
+                        val containerParams = parent.layoutParams
+                        Log.d(FULLSCREEN_TAG, "현재 Container 파라미터 타입: ${containerParams?.javaClass?.simpleName}")
+                        
+                        if (containerParams is LinearLayout.LayoutParams) {
+                            Log.d(FULLSCREEN_TAG, "복원 전 Container - width: ${containerParams.width}, height: ${containerParams.height}, weight: ${containerParams.weight}")
+                            
+                            containerParams.width = originalParams.width
+                            containerParams.height = originalParams.height
+                            containerParams.weight = originalParams.weight
+                            containerParams.setMargins(
+                                originalParams.leftMargin,
+                                originalParams.topMargin,
+                                originalParams.rightMargin,
+                                originalParams.bottomMargin
+                            )
+                            parent.layoutParams = containerParams
+                            
+                            Log.d(FULLSCREEN_TAG, "복원 후 Container - width: ${containerParams.width}, height: ${containerParams.height}, weight: ${containerParams.weight}")
+                            Log.d(FULLSCREEN_TAG, "복원 후 Container 마진 - left: ${containerParams.leftMargin}, top: ${containerParams.topMargin}, right: ${containerParams.rightMargin}, bottom: ${containerParams.bottomMargin}")
+                        } else {
+                            Log.d(FULLSCREEN_TAG, "타입 불일치로 직접 복원")
+                            parent.layoutParams = originalParams
+                        }
+                    }
+                    is FrameLayout.LayoutParams -> {
+                        val containerParams = parent.layoutParams
+                        Log.d(FULLSCREEN_TAG, "현재 Container 파라미터 타입: ${containerParams?.javaClass?.simpleName}")
+                        
+                        if (containerParams is FrameLayout.LayoutParams) {
+                            Log.d(FULLSCREEN_TAG, "복원 전 Container - width: ${containerParams.width}, height: ${containerParams.height}")
+                            
+                            containerParams.width = originalParams.width
+                            containerParams.height = originalParams.height
+                            containerParams.setMargins(
+                                originalParams.leftMargin,
+                                originalParams.topMargin,
+                                originalParams.rightMargin,
+                                originalParams.bottomMargin
+                            )
+                            parent.layoutParams = containerParams
+                            
+                            Log.d(FULLSCREEN_TAG, "복원 후 Container - width: ${containerParams.width}, height: ${containerParams.height}")
+                            Log.d(FULLSCREEN_TAG, "복원 후 Container 마진 - left: ${containerParams.leftMargin}, top: ${containerParams.topMargin}, right: ${containerParams.rightMargin}, bottom: ${containerParams.bottomMargin}")
+                        } else {
+                            Log.d(FULLSCREEN_TAG, "타입 불일치로 직접 복원")
+                            parent.layoutParams = originalParams
+                        }
+                    }
+                    else -> {
+                        Log.d(FULLSCREEN_TAG, "기타 타입으로 직접 복원: ${originalParams.javaClass.simpleName}")
+                        parent.layoutParams = originalParams
+                    }
+                }
+                Log.d(FULLSCREEN_TAG, "Container 레이아웃 파라미터 복원 완료")
+            } ?: run {
+                Log.w(FULLSCREEN_TAG, "원본 Container 파라미터가 null입니다!")
+            }
+            
+            // Fragment 자체 복원
+            originalFragmentLayoutParams?.let { originalParams ->
+                Log.d(FULLSCREEN_TAG, "Fragment 복원 시작 - 원본 타입: ${originalParams.javaClass.simpleName}")
+                Log.d(FULLSCREEN_TAG, "복원 전 Fragment - width: ${fragmentView.layoutParams?.width}, height: ${fragmentView.layoutParams?.height}")
+                
+                fragmentView.layoutParams = originalParams
+                
+                Log.d(FULLSCREEN_TAG, "복원 후 Fragment - width: ${fragmentView.layoutParams?.width}, height: ${fragmentView.layoutParams?.height}")
+                Log.d(FULLSCREEN_TAG, "Fragment 레이아웃 파라미터 복원 완료")
+            } ?: run {
+                Log.w(FULLSCREEN_TAG, "원본 Fragment 파라미터가 null입니다!")
+            }
+            
+            // 원본 padding 복원
+            if (originalFragmentPadding.isNotEmpty()) {
+                Log.d(FULLSCREEN_TAG, "복원 전 Fragment 패딩 - left: ${fragmentView.paddingLeft}, top: ${fragmentView.paddingTop}, right: ${fragmentView.paddingRight}, bottom: ${fragmentView.paddingBottom}")
+                
+                fragmentView.setPadding(
+                    originalFragmentPadding[0],
+                    originalFragmentPadding[1],
+                    originalFragmentPadding[2],
+                    originalFragmentPadding[3]
+                )
+                
+                Log.d(FULLSCREEN_TAG, "복원 후 Fragment 패딩 - left: ${fragmentView.paddingLeft}, top: ${fragmentView.paddingTop}, right: ${fragmentView.paddingRight}, bottom: ${fragmentView.paddingBottom}")
+            } else {
+                Log.w(FULLSCREEN_TAG, "원본 Fragment 패딩이 비어있습니다!")
+            }
+            
+            if (originalParentPadding.isNotEmpty()) {
+                Log.d(FULLSCREEN_TAG, "복원 전 Container 패딩 - left: ${parent.paddingLeft}, top: ${parent.paddingTop}, right: ${parent.paddingRight}, bottom: ${parent.paddingBottom}")
+                
+                parent.setPadding(
+                    originalParentPadding[0],
+                    originalParentPadding[1],
+                    originalParentPadding[2],
+                    originalParentPadding[3]
+                )
+                
+                Log.d(FULLSCREEN_TAG, "복원 후 Container 패딩 - left: ${parent.paddingLeft}, top: ${parent.paddingTop}, right: ${parent.paddingRight}, bottom: ${parent.paddingBottom}")
+            } else {
+                Log.w(FULLSCREEN_TAG, "원본 Container 패딩이 비어있습니다!")
+            }
+            
+            // 상위 ViewGroup들의 padding 복원
+            Log.d(FULLSCREEN_TAG, "상위 ViewGroup 패딩 복원 시작 - 개수: ${originalParentStates.size}")
+            originalParentStates.forEachIndexed { index, (viewGroup, paddings) ->
+                if (paddings.size >= 4) {
+                    Log.d(FULLSCREEN_TAG, "부모${index} 복원 전 패딩 - left: ${viewGroup.paddingLeft}, top: ${viewGroup.paddingTop}, right: ${viewGroup.paddingRight}, bottom: ${viewGroup.paddingBottom}")
+                    
+                    viewGroup.setPadding(paddings[0], paddings[1], paddings[2], paddings[3])
+                    
+                    Log.d(FULLSCREEN_TAG, "부모${index} 복원 후 패딩 - left: ${viewGroup.paddingLeft}, top: ${viewGroup.paddingTop}, right: ${viewGroup.paddingRight}, bottom: ${viewGroup.paddingBottom}")
+                } else {
+                    Log.w(FULLSCREEN_TAG, "부모${index} 패딩 데이터가 부족합니다: ${paddings.size}")
+                }
+            }
+            
+            // 레이아웃 갱신
+            Log.d(FULLSCREEN_TAG, "레이아웃 갱신 시작")
+            parent.requestLayout()
+            fragmentView.requestLayout()
+            
+            // 약간의 지연 후 한 번 더 갱신 (안정성을 위해)
+            fragmentView.post {
+                parent.requestLayout()
+                fragmentView.requestLayout()
+                
+                // 복원 후 실제 크기 확인
+                fragmentView.post {
+                    Log.d(FULLSCREEN_TAG, "복원 후 실제 Fragment 크기: ${fragmentView.width}x${fragmentView.height}")
+                    Log.d(FULLSCREEN_TAG, "복원 후 실제 Container 크기: ${parent.width}x${parent.height}")
+                    Log.d(FULLSCREEN_TAG, "복원 후 Container 레이아웃 파라미터: width=${parent.layoutParams?.width}, height=${parent.layoutParams?.height}")
+                    
+                    if (parent.layoutParams is LinearLayout.LayoutParams) {
+                        val params = parent.layoutParams as LinearLayout.LayoutParams
+                        Log.d(FULLSCREEN_TAG, "복원 후 실제 Container weight: ${params.weight}")
+                        Log.d(FULLSCREEN_TAG, "복원 후 실제 Container 마진: left=${params.leftMargin}, top=${params.topMargin}, right=${params.rightMargin}, bottom=${params.bottomMargin}")
+                    }
+                    
+                    // Activity의 전체 크기와 비교
+                    val activity = requireActivity()
+                    val displayMetrics = activity.resources.displayMetrics
+                    Log.d(FULLSCREEN_TAG, "전체 화면 크기: ${displayMetrics.widthPixels}x${displayMetrics.heightPixels}")
+                }
+                
+                Log.d(FULLSCREEN_TAG, "지연된 레이아웃 갱신 완료")
+            }
+            
+            Log.d(FULLSCREEN_TAG, "========== 원래 크기 복원 완료 ==========")
+            
+        } catch (e: Exception) {
+            Log.e(FULLSCREEN_TAG, "원래 크기 복원 실패", e)
         }
     }
     
 
     
     /**
+     * 전체화면 버튼 아이콘 업데이트
+     */
+    private fun updateFullscreenButtonIcon() {
+        try {
+            // 전체화면 모드에 따라 버튼 텍스트나 아이콘 변경
+            if (isFullscreenMode) {
+                // 전체화면 모드일 때는 축소 아이콘 (⛶ 또는 ⧉)
+                fullscreenButton.text = "⛶"
+            } else {
+                // 일반 모드일 때는 확대 아이콘 (⛶ 또는 ⧉)
+                fullscreenButton.text = "⛶"
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "전체화면 버튼 아이콘 업데이트 실패", e)
+        }
+    }
+    
+    /**
      * 전체화면 버튼 위치 업데이트
      */
     private fun updateFullscreenButtonPosition() {
         try {
-            // 전체화면 모드에서는 버튼을 항상 우측 위에 유지
-            // 위치 변경 없이 그대로 유지
-            Log.d(TAG, "전체화면 버튼 위치 유지 (우측 위)")
+            // RTSP 플레이어 내부에서 전체화면 버튼은 항상 같은 위치 유지
+            // Fragment 레이아웃에 고정된 위치에 있으므로 별도 조정 불필요
+            Log.d(TAG, "전체화면 버튼 위치 유지")
             
         } catch (e: Exception) {
             Log.e(TAG, "전체화면 버튼 위치 업데이트 실패", e)
@@ -1069,4 +1763,88 @@ class VideoPlayerFragment : Fragment() {
         c12PTZController = null
         Log.d(TAG, "비디오 플레이어 Fragment 종료")
     }
-} 
+    
+    /**
+     * SurfaceView 크기와 스타일 변경 통합 함수
+     * @param isFullscreen true: 전체화면 모드, false: 일반 모드
+     */
+    private fun adjustSurfaceViewStyle(isFullscreen: Boolean) {
+        try {
+            if (isFullscreen) {
+                // 전체화면 모드 설정
+                surfaceView.layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                
+                // 모든 패딩 제거
+                surfaceView.setPadding(0, 0, 0, 0)
+                
+                // SurfaceView의 부모 컨테이너들도 패딩 제거
+                var parent = surfaceView.parent as? ViewGroup
+                while (parent != null) {
+                    parent.setPadding(0, 0, 0, 0)
+                    
+                    // 부모가 FrameLayout이라면 자식의 마진도 제거
+                    val surfaceParams = surfaceView.layoutParams
+                    if (surfaceParams is FrameLayout.LayoutParams) {
+                        surfaceParams.setMargins(0, 0, 0, 0)
+                        surfaceView.layoutParams = surfaceParams
+                    }
+                    
+                    if (parent.id == android.R.id.content) break
+                    parent = parent.parent as? ViewGroup
+                }
+                
+                Log.d(FULLSCREEN_TAG, "전체화면 모드로 SurfaceView 설정 완료")
+                
+            } else {
+                // 일반 모드로 복원
+                if (originalSurfaceViewLayoutParams != null) {
+                    surfaceView.layoutParams = originalSurfaceViewLayoutParams
+                    val params = originalSurfaceViewLayoutParams
+                    Log.d(FULLSCREEN_TAG, "원본 레이아웃 파라미터로 복원: width=${params?.width}, height=${params?.height}")
+                } else {
+                    // 원본 파라미터가 없으면 기본값 사용
+                    val orientation = resources.configuration.orientation
+                    val isLandscape = orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                    
+                    if (isLandscape) {
+                        surfaceView.layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    } else {
+                        surfaceView.layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    }
+                }
+                
+                // 패딩 제거
+                surfaceView.setPadding(0, 0, 0, 0)
+                
+                Log.d(FULLSCREEN_TAG, "일반 모드로 SurfaceView 복원 완료")
+            }
+            
+            // 강제로 레이아웃 갱신
+            surfaceView.requestLayout()
+            view?.requestLayout()
+            
+            // 크기 로그 출력
+            surfaceView.post {
+                val mode = if (isFullscreen) "전체화면" else "일반"
+                Log.d(FULLSCREEN_TAG, "${mode} SurfaceView 크기: ${surfaceView.width}x${surfaceView.height}")
+                
+                if (!isFullscreen) {
+                    Log.d(FULLSCREEN_TAG, "원본 SurfaceView 크기: ${originalSurfaceViewSize[0]}x${originalSurfaceViewSize[1]}")
+                    Log.d(FULLSCREEN_TAG, "크기 비교 - 원본: ${originalSurfaceViewSize[0]}x${originalSurfaceViewSize[1]}, 복원: ${surfaceView.width}x${surfaceView.height}")
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "SurfaceView 스타일 변경 실패 (isFullscreen: $isFullscreen)", e)
+        }
+    }
+}

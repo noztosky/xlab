@@ -20,10 +20,10 @@
     <!-- 전체화면 버튼 (우측 위) -->
     <Button
         android:id="@+id/fullscreen_button"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
         android:text="⛶"
-        android:textSize="16sp"
+        android:textSize="18sp"
         android:background="@drawable/button_background_10_percent_black"
         android:textColor="@android:color/white"
         android:gravity="center"
@@ -31,7 +31,9 @@
         android:padding="0dp"
         android:layout_gravity="end|top"
         android:layout_marginTop="@dimen/button_margin"
-        android:layout_marginEnd="@dimen/button_margin" />
+        android:layout_marginEnd="@dimen/button_margin"
+        android:clickable="true"
+        android:focusable="true" />
 
     <!-- PTZ 제어 버튼들 오버레이 -->
     <LinearLayout

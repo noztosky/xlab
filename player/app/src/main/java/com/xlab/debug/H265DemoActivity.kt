@@ -3,14 +3,11 @@ package com.xlab.Player
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -59,9 +56,6 @@ class H265DemoActivity : AppCompatActivity() {
     // SharedPreferences for URL memory
     private lateinit var prefs: SharedPreferences
     
-    // 전체화면 상태 추적
-    private var isFullscreenMode = false
-    
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "H265DemoActivity onCreate 시작")
@@ -82,23 +76,6 @@ class H265DemoActivity : AppCompatActivity() {
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         Log.d(TAG, "화면 방향 변경: ${newConfig.orientation}")
-        
-        // 전체화면 모드에서 회전 시에도 전체화면 유지
-        if (isFullscreenMode) {
-            // 회전 후에도 전체화면 상태 유지
-            window.decorView.post {
-                expandToFullscreen()
-                // Fragment의 컨트롤 버튼들이 회전 후에도 제대로 표시되도록 강제로 레이아웃 조정
-                videoPlayerFragment1?.let { fragment ->
-                    fragment.adjustVideoAspectRatioForFullscreen()
-                }
-            }
-        } else {
-            // 일반 모드에서 회전 시 UI 요소들 표시
-            window.decorView.post {
-                restoreNormalLayout()
-            }
-        }
     }
     
     private fun initViews() {
@@ -292,26 +269,9 @@ class H265DemoActivity : AppCompatActivity() {
             }
         })
         
-        // Player 1 전체화면 콜백 설정
-        Log.d(TAG, "Player 1 전체화면 콜백 설정 시작")
-        val callback1 = object : VideoPlayerFragment.FullscreenCallback {
-            override fun onToggleFullscreen() {
-                runOnUiThread {
-                    handleFullscreenToggle(1)
-                }
-            }
-        }
-        videoPlayerFragment1?.setFullscreenCallback(callback1)
+        // Player 1 전체화면 콜백 설정 제거 (Fragment 내부에서 처리)
         
-        // Player 2 전체화면 콜백 설정
-        val callback2 = object : VideoPlayerFragment.FullscreenCallback {
-            override fun onToggleFullscreen() {
-                runOnUiThread {
-                    handleFullscreenToggle(2)
-                }
-            }
-        }
-        videoPlayerFragment2?.setFullscreenCallback(callback2)
+        // Player 2 전체화면 콜백 설정 제거 (Fragment 내부에서 처리)
     }
     
     private fun connectToStream(playerNum: Int) {
@@ -353,226 +313,6 @@ class H265DemoActivity : AppCompatActivity() {
         fragment?.let {
             it.pauseStream()
             Log.d(TAG, "Player $playerNum 일시정지 요청")
-        }
-    }
-    
-    private fun handleFullscreenToggle(playerNum: Int) {
-        Log.d(TAG, "Player $playerNum 전체화면 토글")
-        toggleFullscreenMode(playerNum)
-    }
-    
-    private fun toggleFullscreenMode(playerNum: Int) {
-        try {
-            Log.d(TAG, "Player $playerNum 전체화면 모드 토글")
-
-            if (isFullscreenMode) {
-                // 전체화면 모드 해제
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    window.insetsController?.show(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                } else {
-                    @Suppress("DEPRECATION")
-                    window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_VISIBLE
-                }
-                supportActionBar?.show()
-                restoreNormalLayout()
-                isFullscreenMode = false
-            } else {
-                // 전체화면 모드 설정
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    window.insetsController?.let { controller ->
-                        controller.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                        controller.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                    }
-                } else {
-                    @Suppress("DEPRECATION")
-                    window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
-                            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                            or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN)
-                }
-                supportActionBar?.hide()
-                expandToFullscreen()
-                isFullscreenMode = true
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "전체화면 모드 토글 실패", e)
-        }
-    }
-    
-    private fun expandToFullscreen() {
-        try {
-            Log.d(TAG, "expandToFullscreen() 함수 시작")
-            val videoContainer = findViewById<View>(R.id.video_player_container1)
-            
-            // 현재 화면 방향 확인
-            val orientation = resources.configuration.orientation
-            Log.d(TAG, "현재 화면 방향: ${if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) "가로모드" else "세로모드"}")
-            
-            // Activity의 UI 요소들만 숨기기 (Fragment는 유지)
-            val elementsToHide = listOf(
-                R.id.url_edit_text1,
-                R.id.connect_button1,
-                R.id.disconnect_button1,
-                R.id.play_button1,
-                R.id.pause_button1,
-                R.id.url_edit_text2,
-                R.id.connect_button2,
-                R.id.disconnect_button2,
-                R.id.play_button2,
-                R.id.pause_button2
-            )
-            
-            elementsToHide.forEach { id ->
-                findViewById<View>(id)?.visibility = View.GONE
-            }
-            
-            // 비디오 컨테이너를 전체화면으로 설정
-            Log.d(TAG, "비디오 컨테이너 크기 변경 전: ${videoContainer.width}x${videoContainer.height}")
-            val layoutParams = videoContainer.layoutParams
-            Log.d(TAG, "현재 레이아웃 파라미터 타입: ${layoutParams?.javaClass?.simpleName}")
-            
-            // 비디오 컨테이너 크기 확인
-            videoContainer.post {
-                Log.d(TAG, "비디오 컨테이너 크기 변경 후: ${videoContainer.width}x${videoContainer.height}")
-            }
-            
-            // Fragment 컨테이너 자체의 패딩도 제거
-            videoContainer.setPadding(0, 0, 0, 0)
-            
-            // weight 제거하여 전체화면으로 설정
-            when (layoutParams) {
-                is LinearLayout.LayoutParams -> {
-                    layoutParams.width = ViewGroup.LayoutParams.MATCH_PARENT
-                    layoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
-                    layoutParams.weight = 0f  // weight를 0으로 설정
-                    videoContainer.layoutParams = layoutParams
-                    Log.d(TAG, "LinearLayout.LayoutParams로 설정 완료 (weight=0)")
-                }
-                else -> {
-                    val newParams = LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    ).apply {
-                        weight = 0f  // weight를 0으로 설정
-                    }
-                    videoContainer.layoutParams = newParams
-                    Log.d(TAG, "새로운 LinearLayout.LayoutParams로 설정 완료 (weight=0)")
-                }
-            }
-            
-            // ScrollView도 전체화면으로 설정
-            val scrollView = findViewById<ScrollView>(R.id.scroll_view)
-            scrollView?.let { sv ->
-                val scrollParams = sv.layoutParams
-                scrollParams?.let { params ->
-                    params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                    params.height = ViewGroup.LayoutParams.MATCH_PARENT
-                    sv.layoutParams = params
-                    Log.d(TAG, "ScrollView 크기를 전체화면으로 설정")
-                }
-            }
-            
-            // LinearLayout도 전체화면으로 설정 (wrap_content 제거)
-            val linearLayout = scrollView?.getChildAt(0) as? LinearLayout
-            linearLayout?.let { ll ->
-                val linearParams = ll.layoutParams
-                linearParams?.let { params ->
-                    params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                    params.height = ViewGroup.LayoutParams.MATCH_PARENT
-                    ll.layoutParams = params
-                    Log.d(TAG, "LinearLayout 크기를 전체화면으로 설정")
-                }
-            }
-            
-            // VideoPlayerFragment에 전체화면 모드 알림
-            videoPlayerFragment1?.let { fragment ->
-                // Fragment의 비디오 비율 조정을 강제로 호출
-                fragment.adjustVideoAspectRatioForFullscreen()
-                
-                // Fragment의 컨트롤 버튼들이 제대로 표시되도록 추가 조정
-                fragment.view?.post {
-                    Log.d(TAG, "Fragment view.post 콜백 실행")
-                    fragment.adjustVideoAspectRatioForFullscreen()
-                    
-                    // Fragment의 레이아웃을 강제로 다시 그리기
-                    fragment.view?.requestLayout()
-                    fragment.view?.invalidate()
-                    
-                    // Fragment 크기 로그 출력
-                    fragment.view?.let { fragmentView ->
-                        Log.d(TAG, "Activity에서 Fragment 크기 - 너비: ${fragmentView.width}, 높이: ${fragmentView.height}")
-                        Log.d(TAG, "Activity에서 Fragment 부모 크기 - 너비: ${(fragmentView.parent as? View)?.width}, 높이: ${(fragmentView.parent as? View)?.height}")
-                    }
-                    
-                    // 한 번 더 post로 재확인
-                    fragment.view?.post {
-                        Log.d(TAG, "Fragment 최종 크기 확인: ${fragment.view?.width}x${fragment.view?.height}")
-                        fragment.adjustVideoAspectRatioForFullscreen()
-                    }
-                }
-            }
-            
-            Log.d(TAG, "Fragment 전체화면 확장 완료 (Fragment 컨트롤 버튼들 유지)")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Fragment 전체화면 확장 실패", e)
-        }
-    }
-    
-    /**
-     * Fragment를 원래 크기로 복원
-     */
-    private fun restoreNormalLayout() {
-        try {
-            val videoContainer1 = findViewById<View>(R.id.video_player_container1)
-            val videoContainer2 = findViewById<View>(R.id.video_player_container2)
-            
-            // Activity의 UI 요소들을 다시 표시
-            val elementsToShow = listOf(
-                R.id.url_edit_text1,
-                R.id.connect_button1,
-                R.id.disconnect_button1,
-                R.id.play_button1,
-                R.id.pause_button1,
-                R.id.url_edit_text2,
-                R.id.connect_button2,
-                R.id.disconnect_button2,
-                R.id.play_button2,
-                R.id.pause_button2
-            )
-            
-            elementsToShow.forEach { id ->
-                findViewById<View>(id)?.visibility = View.VISIBLE
-            }
-            
-            // 비디오 컨테이너를 원래 크기로 복원
-            val layoutParams1 = videoContainer1.layoutParams as? LinearLayout.LayoutParams
-            layoutParams1?.let { params ->
-                params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = 0  // weight를 사용하는 경우
-                params.weight = 1.0f  // 원래 weight 값으로 복원
-                videoContainer1.layoutParams = params
-            }
-            
-            val layoutParams2 = videoContainer2.layoutParams as? LinearLayout.LayoutParams
-            layoutParams2?.let { params ->
-                params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                params.height = 0  // weight를 사용하는 경우
-                params.weight = 1.0f  // 원래 weight 값으로 복원
-                videoContainer2.layoutParams = params
-            }
-            
-            // Fragment 컨테이너의 패딩도 복원
-            videoContainer1.setPadding(0, 0, 0, 0)
-            videoContainer2.setPadding(0, 0, 0, 0)
-            
-            Log.d(TAG, "Fragment 원래 크기 복원 완료")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "Fragment 원래 크기 복원 실패", e)
         }
     }
     
