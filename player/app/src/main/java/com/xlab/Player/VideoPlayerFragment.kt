@@ -1,6 +1,6 @@
 package com.xlab.Player
 
-// Build: 7
+// Build: 11
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
@@ -703,7 +703,7 @@ class VideoPlayerFragment : Fragment() {
         try {
             val activity = activity ?: return
             
-            // 모든 컨트롤 UI 요소들 숨기기
+            // 전체화면 모드에서 숨길 UI 요소들 (연결/재생 관련 버튼들과 URL 라벨들)
             val uiElementIds = listOf(
                 R.id.url_edit_text1, R.id.connect_button1, R.id.disconnect_button1,
                 R.id.play_button1, R.id.pause_button1,
@@ -714,6 +714,9 @@ class VideoPlayerFragment : Fragment() {
             uiElementIds.forEach { id ->
                 activity.findViewById<View>(id)?.visibility = View.GONE
             }
+            
+            // 전체화면 토글 버튼과 PTZ 컨트롤 버튼들은 유지 (보이도록)
+            // fullscreenButton, upButton, downButton, leftButton, rightButton, homeButton, recordButton, photoButton 등은 숨기지 않음
             
             // 현재 전체화면이 되지 않는 다른 Fragment 컨테이너 숨기기
             val currentContainer = view?.parent as? ViewGroup
@@ -728,7 +731,7 @@ class VideoPlayerFragment : Fragment() {
                 }
             }
             
-            Log.d(TAG, "Activity UI 요소들 숨김 완료")
+            Log.d(TAG, "Activity UI 요소들 숨김 완료 (필요한 버튼들은 유지)")
             
         } catch (e: Exception) {
             Log.e(TAG, "Activity UI 요소 숨기기 실패", e)
@@ -1771,14 +1774,22 @@ class VideoPlayerFragment : Fragment() {
     private fun adjustSurfaceViewStyle(isFullscreen: Boolean) {
         try {
             if (isFullscreen) {
-                // 전체화면 모드 설정
-                surfaceView.layoutParams = FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
+                // 전체화면 모드 설정 - SurfaceView를 화면 전체 크기로 설정
+                val activity = requireActivity()
+                val displayMetrics = activity.resources.displayMetrics
+                val screenWidth = displayMetrics.widthPixels
+                val screenHeight = displayMetrics.heightPixels
                 
-                // 모든 패딩 제거
+                val fullscreenParams = FrameLayout.LayoutParams(
+                    screenWidth,
+                    screenHeight
+                )
+                fullscreenParams.setMargins(0, 0, 0, 0)
+                surfaceView.layoutParams = fullscreenParams
                 surfaceView.setPadding(0, 0, 0, 0)
+                
+                // SurfaceView를 최상위로 이동 (다른 모든 뷰 위에 표시)
+                surfaceView.bringToFront()
                 
                 // SurfaceView의 부모 컨테이너들도 패딩 제거
                 var parent = surfaceView.parent as? ViewGroup
@@ -1796,7 +1807,7 @@ class VideoPlayerFragment : Fragment() {
                     parent = parent.parent as? ViewGroup
                 }
                 
-                Log.d(FULLSCREEN_TAG, "전체화면 모드로 SurfaceView 설정 완료")
+                Log.d(FULLSCREEN_TAG, "전체화면 모드로 SurfaceView 설정 완료 - 크기: ${screenWidth}x${screenHeight}")
                 
             } else {
                 // 일반 모드로 복원
