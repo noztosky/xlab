@@ -1,6 +1,6 @@
 package com.xlab.Player
 
-// Build: 11
+// Build: 12
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
@@ -110,6 +110,11 @@ class VideoPlayerFragment : Fragment() {
     private lateinit var recordButton: Button
     private lateinit var photoButton: Button
     
+    // 재생 상태 보존을 위한 변수들
+    private var savedVideoUrl: String = ""
+    private var wasPlayingBeforeRotation = false
+    private var wasConnectedBeforeRotation = false
+    
     override fun onCreateView(
         inflater: LayoutInflater,
         container: ViewGroup?,
@@ -124,15 +129,128 @@ class VideoPlayerFragment : Fragment() {
         initViews()
         setupVideoPlayer()
         setupPTZControls()
+        
+        // 화면 회전 후 재연결 시도
+        if (savedVideoUrl.isNotEmpty()) {
+            Log.d(TAG, "화면 회전 후 재연결 시도: $savedVideoUrl")
+            reconnectAfterRotation()
+        }
     }
     
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
         super.onConfigurationChanged(newConfig)
         Log.d(TAG, "Fragment 화면 방향 변경: ${newConfig.orientation}")
         
+        // 현재 재생 상태 저장
+        savePlaybackState()
+        
         // 비디오 플레이어가 재생 중이면 화면 비율 조정
         if (isPlaying && xlabPlayer != null) {
             adjustVideoAspectRatio()
+        }
+    }
+    
+    /**
+     * 재생 상태 저장
+     */
+    private fun savePlaybackState() {
+        savedVideoUrl = videoUrl
+        wasPlayingBeforeRotation = isPlaying
+        wasConnectedBeforeRotation = isConnected
+        Log.d(TAG, "재생 상태 저장 - URL: $savedVideoUrl, 재생중: $wasPlayingBeforeRotation, 연결됨: $wasConnectedBeforeRotation")
+    }
+    
+    /**
+     * 화면 회전 후 재연결
+     */
+    private fun reconnectAfterRotation() {
+        try {
+            Log.d(TAG, "화면 회전 후 재연결 시작")
+            
+            // XlabPlayer가 준비될 때까지 잠시 대기
+            view?.postDelayed({
+                if (savedVideoUrl.isNotEmpty() && xlabPlayer != null) {
+                    Log.d(TAG, "재연결 시도: $savedVideoUrl")
+                    
+                    // 강제로 모든 연결 해제
+                    forceDisconnect()
+                    
+                    // 잠시 대기 후 재연결
+                    view?.postDelayed({
+                        // 새로운 SurfaceView로 재연결
+                        xlabPlayer?.initializeWithSurfaceView(surfaceView)
+                        
+                        // RTSP 스트림 재연결
+                        playRtspStream(savedVideoUrl)
+                        
+                        // 이전에 재생 중이었다면 재생 재개
+                        if (wasPlayingBeforeRotation) {
+                            view?.postDelayed({
+                                xlabPlayer?.play()
+                                isPlaying = true
+                                playerStateCallback?.onPlayerPlaying()
+                                Log.d(TAG, "재연결 후 재생 재개")
+                            }, 2000)
+                        }
+                        
+                        Log.d(TAG, "재연결 완료")
+                    }, 1000)
+                    
+                } else {
+                    Log.w(TAG, "재연결 실패 - URL: $savedVideoUrl, Player: ${xlabPlayer != null}")
+                }
+            }, 500)
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "화면 회전 후 재연결 실패", e)
+        }
+    }
+    
+    /**
+     * 강제 연결 해제 (화면 회전이나 앱 종료 시에만 사용)
+     */
+    private fun forceDisconnect() {
+        try {
+            Log.d(TAG, "강제 연결 해제 시작")
+            
+            // XlabPlayer 완전 정지
+            xlabPlayer?.pause()
+            xlabPlayer?.stop()
+            
+            // 연결 상태 초기화
+            isConnected = false
+            isPlaying = false
+            
+            // PTZ 제어기 연결 해제
+            c12PTZController?.disconnect()
+            
+            // 잠시 대기 (네트워크 연결 정리)
+            Thread.sleep(500)
+            
+            Log.d(TAG, "강제 연결 해제 완료")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "강제 연결 해제 실패", e)
+        }
+    }
+    
+    /**
+     * 스트림 연결 해제
+     */
+    fun disconnectStream() {
+        try {
+            Log.d(TAG, "스트림 연결 해제")
+            
+            // 단순히 일시정지만 수행 (강제 해제하지 않음)
+            xlabPlayer?.pause()
+            
+            // 연결 상태 업데이트
+            isConnected = false
+            isPlaying = false
+            playerStateCallback?.onPlayerDisconnected()
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "스트림 연결 해제 실패", e)
         }
     }
     
@@ -1248,6 +1366,16 @@ class VideoPlayerFragment : Fragment() {
         try {
             Log.d(TAG, "RTSP 스트림 재생 시작: $url")
             
+            // 기존 연결이 있으면 먼저 해제
+            if (isConnected) {
+                Log.d(TAG, "기존 연결 해제 후 재연결")
+                forceDisconnect()
+                Thread.sleep(1000) // 네트워크 정리를 위한 대기
+            }
+            
+            // URL 저장
+            videoUrl = url
+            
             // 저장된 버퍼시간을 XlabPlayer에 적용
             val bufferTimeSeconds = bufferTime / 1000.0f
             Log.d(TAG, "버퍼시간 적용: ${bufferTimeSeconds}초")
@@ -1303,27 +1431,6 @@ class VideoPlayerFragment : Fragment() {
             
         } catch (e: Exception) {
             Log.e(TAG, "스트림 재개 실패", e)
-        }
-    }
-    
-    /**
-     * 스트림 연결 해제
-     */
-    fun disconnectStream() {
-        try {
-            Log.d(TAG, "스트림 연결 해제")
-            xlabPlayer?.pause()
-            
-            // PTZ 제어기 연결 해제
-            c12PTZController?.disconnect()
-            
-            // 연결 상태 업데이트
-            isConnected = false
-            isPlaying = false
-            playerStateCallback?.onPlayerDisconnected()
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "스트림 연결 해제 실패", e)
         }
     }
     
@@ -1760,6 +1867,11 @@ class VideoPlayerFragment : Fragment() {
     
     override fun onDestroyView() {
         super.onDestroyView()
+        
+        // 재생 상태 저장
+        savePlaybackState()
+        
+        // 리소스 해제
         xlabPlayer?.release()
         c12PTZController?.release()
         xlabPlayer = null
