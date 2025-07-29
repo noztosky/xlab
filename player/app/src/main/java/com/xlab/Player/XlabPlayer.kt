@@ -109,76 +109,31 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 registerConfigurationChangeReceiver()
             }
 
-            // LibVLC 초기화
-            try {
-                // 옵션을 더 단순하게 시작
-                val options = ArrayList<String>()
-                options.add("--intf=dummy")
-                options.add("--no-audio")
-                
-                // Context가 올바른지 확인
-                if (context == null) {
-                    playerCallback?.onPlayerError("Context가 null입니다")
-                    return false
-                }
-                
-                libVLC = LibVLC(context, options)
-                if (libVLC == null) {
-                    playerCallback?.onPlayerError("LibVLC 초기화 실패")
-                    return false
-                }
-            } catch (e: Exception) {
-                val errorMsg = if (e.message.isNullOrEmpty()) {
-                    "LibVLC 생성 중 알 수 없는 오류 발생 - ${e.javaClass.simpleName}"
-                } else {
-                    e.message!!
-                }
-                playerCallback?.onPlayerError("LibVLC 생성 오류: $errorMsg")
-                return false
-            }
-
-            // MediaPlayer 초기화
-            try {
-                mediaPlayer = MediaPlayer(libVLC)
-                if (mediaPlayer == null) {
-                    playerCallback?.onPlayerError("MediaPlayer 초기화 실패")
-                    return false
-                }
-            } catch (e: Exception) {
-                playerCallback?.onPlayerError("MediaPlayer 생성 오류: ${e.message}")
-                return false
-            }
-
-            // VideoLayout 초기화
-            try {
-                videoLayout?.let { parent.removeView(it) }
-                videoLayout = VLCVideoLayout(context)
-                if (videoLayout == null) {
-                    playerCallback?.onPlayerError("VideoLayout 초기화 실패")
-                    return false
-                }
-                parent.addView(videoLayout)
-            } catch (e: Exception) {
-                playerCallback?.onPlayerError("VideoLayout 생성 오류: ${e.message}")
+            // LibVLC 초기화 (안전한 옵션 사용)
+            val options = arrayListOf("--intf=dummy", "--no-audio")
+            if (context == null) {
+                playerCallback?.onPlayerError("Context가 null입니다")
                 return false
             }
             
-            // 리스너 설정
-            try {
-                setupLayoutChangeListener()
-                mediaPlayer?.attachViews(videoLayout!!, null, true, false)
-                setupEventListeners()
-            } catch (e: Exception) {
-                playerCallback?.onPlayerError("리스너 설정 오류: ${e.message}")
-                return false
-            }
+            libVLC = LibVLC(context, options)
+            mediaPlayer = MediaPlayer(libVLC)
+
+            // VideoLayout 초기화
+            videoLayout?.let { parent.removeView(it) }
+            videoLayout = VLCVideoLayout(context)
+            parent.addView(videoLayout)
+            
+            setupLayoutChangeListener()
+            mediaPlayer?.attachViews(videoLayout!!, null, true, false)
+            setupEventListeners()
             
             isInitialized = true
             playerCallback?.onPlayerReady()
             setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
             return true
         } catch (e: Exception) {
-            val errorMsg = e.message ?: "알 수 없는 오류"
+            val errorMsg = e.message ?: "알 수 없는 오류 - ${e.javaClass.simpleName}"
             playerCallback?.onPlayerError("초기화 실패: $errorMsg")
             return false
         }
@@ -270,25 +225,9 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             }
             
             releaseMedia()
-            
-            // Media 객체 생성 (URI로 명시적 생성)
             media = Media(libVLC, Uri.parse(url))
-            if (media == null) {
-                playerCallback?.onPlayerError("Media 객체 생성 실패")
-                return false
-            }
-            
-            // RTSP 옵션 설정
             media?.addOption(":network-caching=1000")
-            
-            // Media를 MediaPlayer에 설정
             mediaPlayer?.media = media
-            if (mediaPlayer?.media == null) {
-                playerCallback?.onPlayerError("Media 설정 실패")
-                return false
-            }
-            
-            // 재생 시작
             mediaPlayer?.play()
             
             currentUrl = url
@@ -301,43 +240,31 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
     }
 
-    fun play(): Boolean {
-        return try {
-            if (isConnected && !isPlaying) {
-                mediaPlayer?.play()
-                isPlaying = true
-                playerCallback?.onPlayerPlaying()
-                true
-            } else {
-                false
-            }
-        } catch (e: Exception) {
-            false
-        }
+    fun play(): Boolean = executeAction(isConnected && !isPlaying) {
+        mediaPlayer?.play()
+        isPlaying = true
+        playerCallback?.onPlayerPlaying()
     }
 
-    fun pause(): Boolean {
-        return try {
-            if (isPlaying) {
-                mediaPlayer?.pause()
-                isPlaying = false
-                playerCallback?.onPlayerPaused()
-                true
-            } else {
-                false
-            }
-        } catch (e: Exception) {
-            false
-        }
+    fun pause(): Boolean = executeAction(isPlaying) {
+        mediaPlayer?.pause()
+        isPlaying = false
+        playerCallback?.onPlayerPaused()
     }
 
-    fun stop(): Boolean {
+    fun stop(): Boolean = executeAction(true) {
+        mediaPlayer?.stop()
+        isPlaying = false
+        isConnected = false
+        playerCallback?.onPlayerDisconnected()
+    }
+
+    private fun executeAction(condition: Boolean, action: () -> Unit): Boolean {
         return try {
-            mediaPlayer?.stop()
-            isPlaying = false
-            isConnected = false
-            playerCallback?.onPlayerDisconnected()
-            true
+            if (condition) {
+                action()
+                true
+            } else false
         } catch (e: Exception) {
             false
         }
