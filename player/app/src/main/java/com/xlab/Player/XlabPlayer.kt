@@ -1,17 +1,16 @@
 package com.xlab.Player
 
 import android.app.Activity
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.graphics.PixelFormat
+import android.content.IntentFilter
+import android.content.res.Configuration
 import android.net.Uri
-import android.os.Build
-import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import androidx.lifecycle.Lifecycle
@@ -31,7 +30,6 @@ import org.videolan.libvlc.util.VLCVideoLayout
 class XLABPlayer(private val context: Context) : LifecycleObserver {
     companion object {
         private const val TAG = "XLABPlayer"
-        private const val DEFAULT_RTSP_URL = "rtsp://192.168.144.108:554/stream=1"
     }
 
     private var libVLC: LibVLC? = null
@@ -50,13 +48,11 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private var originalLayoutParams: ViewGroup.LayoutParams? = null
     private var fullscreenButton: Any? = null // XLABPlayerButton 또는 SimpleFullscreenButton
     private var activity: Activity? = null
-    
-    // WindowManager를 통한 전체화면 구현
-    private var windowManager: WindowManager? = null
     private var fullscreenContainer: FrameLayout? = null
-    private var fullscreenLayoutParams: WindowManager.LayoutParams? = null
-    
 
+    // Configuration 변경 감지
+    private var configurationReceiver: BroadcastReceiver? = null
+    private var isReceiverRegistered = false
 
     interface PlayerCallback {
         fun onPlayerReady()
@@ -72,8 +68,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     // 자동 라이프사이클 관리
     private var isLifecycleRegistered = false
     
-
-    
     // 버튼 관리
     private var buttonContainer: LinearLayout? = null
     private val playerButtons = mutableListOf<XLABPlayerButton>()
@@ -83,9 +77,46 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         try {
             ProcessLifecycleOwner.get().lifecycle.addObserver(this)
             isLifecycleRegistered = true
-    // 라이프사이클 감지 시작
         } catch (e: Exception) {
             // 라이프사이클 등록 실패 (무시)
+        }
+        
+        // Configuration 변경 감지 설정
+        setupConfigurationChangeListener()
+    }
+
+    /**
+     * Configuration 변경 감지 설정
+     */
+    private fun setupConfigurationChangeListener() {
+        configurationReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == Intent.ACTION_CONFIGURATION_CHANGED) {
+                    Log.d(TAG, "Configuration 변경 감지")
+                    handleConfigurationChange()
+                }
+            }
+        }
+    }
+
+    /**
+     * Configuration 변경 처리
+     */
+    private fun handleConfigurationChange() {
+        // 약간의 지연 후 크기 재계산 (Layout이 완료될 때까지 대기)
+        videoLayout?.post {
+            if (isFullscreen) {
+                // 전체화면 모드에서는 스케일 재조정
+                activity?.let { act ->
+                    videoLayout?.let { layout ->
+                        adjustVideoScaleForFullscreen(layout, act)
+                    }
+                }
+            } else {
+                // 일반 모드에서는 현재 스케일링 모드 재적용
+                setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+            }
+            Log.d(TAG, "화면 회전에 따른 영상 크기 재조정 완료")
         }
     }
 
@@ -94,18 +125,19 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
      */
     fun initialize(parent: ViewGroup): Boolean {
         try {
-    // XLABPlayer 초기화 시작
             this.parentViewGroup = parent
             
             // Activity 참조 저장 (전체화면 모드를 위해)
             if (context is Activity) {
                 this.activity = context as Activity
-                windowManager = activity?.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                
+                // Configuration 변경 감지 등록
+                registerConfigurationChangeReceiver()
             }
 
             val options = mutableListOf(
                 "--intf=dummy",
-                "--network-caching=1000",
+                "--network-caching=0",
                 "--no-audio",
                 "--avcodec-hw=any"
             )
@@ -117,6 +149,9 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             videoLayout = VLCVideoLayout(context)
             parent.addView(videoLayout)
             
+            // View 크기 변경 감지 리스너 추가
+            setupLayoutChangeListener()
+            
             // MediaPlayer를 VideoLayout에 연결 (하드웨어 가속)
             mediaPlayer?.attachViews(videoLayout!!, null, true, false)
             
@@ -127,12 +162,69 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             // 자동으로 플레이어 창 크기에 맞춤
             setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
             
-            // 크기 정보 출력
-            logSizeInfo()
             return true
         } catch (e: Exception) {
             playerCallback?.onPlayerError("초기화 실패: ${e.message}")
             return false
+        }
+    }
+
+    /**
+     * Configuration 변경 리시버 등록
+     */
+    private fun registerConfigurationChangeReceiver() {
+        try {
+            if (!isReceiverRegistered && configurationReceiver != null) {
+                val filter = IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED)
+                context.registerReceiver(configurationReceiver, filter)
+                isReceiverRegistered = true
+                Log.d(TAG, "Configuration 변경 리시버 등록됨")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Configuration 변경 리시버 등록 실패: ${e.message}")
+        }
+    }
+
+    /**
+     * Configuration 변경 리시버 해제
+     */
+    private fun unregisterConfigurationChangeReceiver() {
+        try {
+            if (isReceiverRegistered && configurationReceiver != null) {
+                context.unregisterReceiver(configurationReceiver)
+                isReceiverRegistered = false
+                Log.d(TAG, "Configuration 변경 리시버 해제됨")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Configuration 변경 리시버 해제 실패: ${e.message}")
+        }
+    }
+
+    /**
+     * VideoLayout 크기 변경 감지 설정
+     */
+    private fun setupLayoutChangeListener() {
+        videoLayout?.addOnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val newWidth = right - left
+            val newHeight = bottom - top
+            val oldWidth = oldRight - oldLeft
+            val oldHeight = oldBottom - oldTop
+            
+            // 크기가 실제로 변경된 경우에만 처리
+            if (newWidth != oldWidth || newHeight != oldHeight) {
+                Log.d(TAG, "VideoLayout 크기 변경: ${oldWidth}x${oldHeight} -> ${newWidth}x${newHeight}")
+                
+                // 크기 변경 후 스케일링 재조정
+                view.post {
+                    if (isFullscreen) {
+                        activity?.let { act ->
+                            adjustVideoScaleForFullscreen(view as VLCVideoLayout, act)
+                        }
+                    } else {
+                        setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                    }
+                }
+            }
         }
     }
 
@@ -147,8 +239,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         playerCallback?.onPlayerPlaying()
                         // 자동으로 플레이어 창 크기에 맞춤
                         setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
-                        // 재생 시작 시 크기 정보 출력
-                        logSizeInfo()
                     }
                     MediaPlayer.Event.Paused -> {
                         isPlaying = false
@@ -174,8 +264,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         if (event.voutCount > 0) {
                             // 자동으로 플레이어 창 크기에 맞춤
                             setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
-                            // 비디오 출력 시작 시 크기 정보 출력
-                            logSizeInfo()
                         }
                     }
                 }
@@ -183,7 +271,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         })
     }
 
-    fun connectAndPlay(url: String = DEFAULT_RTSP_URL): Boolean {
+    fun connectAndPlay(url: String = "rtsp://192.168.144.108:554/stream=1"): Boolean {
         try {
             if (!isInitialized) {
                 playerCallback?.onPlayerError("플레이어가 초기화되지 않음")
@@ -198,7 +286,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 playerCallback?.onPlayerError("Media 객체 생성 실패")
                 return false
             }
-// Media 객체 생성 성공
             
             // RTSP 옵션 설정 (단순화)
             media?.addOption(":network-caching=1000")
@@ -229,7 +316,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 mediaPlayer?.play()
                 isPlaying = true
                 playerCallback?.onPlayerPlaying()
-        // 재생 시작
                 true
             } else {
                 false
@@ -245,7 +331,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 mediaPlayer?.pause()
                 isPlaying = false
                 playerCallback?.onPlayerPaused()
-        // 일시정지
                 true
             } else {
                 false
@@ -261,7 +346,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             isPlaying = false
             isConnected = false
             playerCallback?.onPlayerDisconnected()
-    // 정지
             true
         } catch (e: Exception) {
             false
@@ -274,7 +358,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             releaseMedia()
             isConnected = false
             currentUrl = ""
-    // 연결 해제
             true
         } catch (e: Exception) {
             false
@@ -292,8 +375,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
 
     fun release() {
         try {
-    // 플레이어 해제 시작
-            
             // 전체화면 해제
             if (isFullscreen) {
                 try {
@@ -303,14 +384,17 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 }
             }
             
+            // Configuration 변경 리시버 해제
+            unregisterConfigurationChangeReceiver()
+            
             // 강제 정지로 RTSP 세션 정리
             if (isPlaying || isConnected) {
                 try {
                     mediaPlayer?.stop()
                     Thread.sleep(200) // RTSP TEARDOWN 대기
-                            } catch (e: Exception) {
-                // 정지 중 오류 (무시)
-            }
+                } catch (e: Exception) {
+                    // 정지 중 오류 (무시)
+                }
             }
             
             // 미디어 해제
@@ -349,7 +433,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 try {
                     ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
                     isLifecycleRegistered = false
-        // 라이프사이클 감지 해제
                 } catch (e: Exception) {
                     // 라이프사이클 해제 실패 (무시)
                 }
@@ -361,7 +444,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             isConnected = false
             currentUrl = ""
             
-// 플레이어 해제 완료
         } catch (e: Exception) {
             // 플레이어 해제 실패 (무시)
         }
@@ -372,7 +454,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
      */
     @OnLifecycleEvent(Lifecycle.Event.ON_STOP)
     fun onAppBackground() {
-// 앱 백그라운드 - 재생 일시정지
         if (isPlaying) {
             try {
                 pause()
@@ -387,7 +468,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
      */
     @OnLifecycleEvent(Lifecycle.Event.ON_START)
     fun onAppForeground() {
-// 앱 포그라운드 복귀
         // 필요시 재생 재개 로직 추가 가능
     }
     
@@ -396,7 +476,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
      */
     @OnLifecycleEvent(Lifecycle.Event.ON_DESTROY)
     fun onAppDestroy() {
-// 앱 프로세스 종료 감지 - 자동 해제
         try {
             release()
         } catch (e: Exception) {
@@ -407,8 +486,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     fun setCallback(callback: PlayerCallback) {
         this.playerCallback = callback
     }
-
-
 
     /**
      * 버튼 컨테이너 추가 (플레이어 아래쪽)
@@ -482,8 +559,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             stop()
         }
         
-
-        
         // 해제 버튼
         buttons["disconnect"] = addButton("해제", XLABPlayerButton.ButtonType.DANGER) {
             disconnect()
@@ -508,9 +583,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             }
             
             setVideoScaleMode(currentMode)
-            
-            // 로그로 현재 모드 표시
-// 스케일링 모드 변경
         }
         
         return scaleButton
@@ -526,7 +598,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 "재생" -> button.isEnabled = isConnected && !isPlaying
                 "일시정지" -> button.isEnabled = isConnected && isPlaying
                 "정지" -> button.isEnabled = isConnected
-
                 "해제" -> button.isEnabled = isConnected
             }
         }
@@ -559,7 +630,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         layout.scaleX = 2.0f
                         layout.scaleY = 2.0f
                     }
-// 창에 맞춤 (강제 확대)
                 }
                 VideoScaleMode.FILL_WINDOW -> {
                     // 플레이어 크기를 완전히 채움
@@ -568,7 +638,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                     layout.layoutParams = params
                     layout.scaleX = 3.0f // 3배 확대
                     layout.scaleY = 3.0f
-// 창 채움
                 }
                 VideoScaleMode.ORIGINAL_SIZE -> {
                     // 원본 크기 유지
@@ -577,7 +646,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                     layout.layoutParams = params
                     layout.scaleX = 1f
                     layout.scaleY = 1f
-// 원본 크기
                 }
                 VideoScaleMode.STRETCH -> {
                     // 늘려서 완전히 채움
@@ -586,7 +654,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                     layout.layoutParams = params
                     layout.scaleX = 4.0f // 4배 확대
                     layout.scaleY = 4.0f
-// 늘림
                 }
             }
         }
@@ -606,43 +673,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     fun isPlayerPlaying(): Boolean = isPlaying
     fun isPlayerConnected(): Boolean = isConnected
     fun getCurrentUrl(): String = currentUrl
-    
-    /**
-     * 오버레이 권한 체크
-     */
-    fun checkOverlayPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            Settings.canDrawOverlays(context)
-        } else {
-            true // API 23 미만에서는 권한 불필요
-        }
-    }
-    
-    /**
-     * 오버레이 권한 요청 (설정 화면으로 이동)
-     */
-    fun requestOverlayPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) {
-            try {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${context.packageName}")
-                )
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            } catch (e: Exception) {
-                // 권한 요청 실패
-                playerCallback?.onPlayerError("오버레이 권한 설정을 열 수 없습니다")
-            }
-        }
-    }
-    
-    /**
-     * 전체화면 사용 가능 여부 체크 (권한 포함)
-     */
-    fun canUseFullscreen(): Boolean {
-        return checkOverlayPermission() && windowManager != null
-    }
 
     /**
      * 전체화면 토글 (플레이어 창을 전체화면 크기로 확장)
@@ -677,7 +707,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
     }
     
-        /**
+    /**
      * 전체화면 진입 (Activity 전체 영역을 강제로 차지)
      */
     private fun enterFullscreen() {
@@ -891,8 +921,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         addView(exitButton, buttonParams)
     }
 
-
-
     /**
      * 전체화면에서 비디오 스케일 자동 조정
      */
@@ -937,40 +965,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             // 스케일 조정 실패 시 기본값
             layout.scaleX = 1.5f
             layout.scaleY = 1.5f
-        }
-    }
-
-    /**
-     * 플레이어 창 크기와 영상 크기 정보 출력
-     */
-    private fun logSizeInfo() {
-        videoLayout?.let { layout ->
-            // 플레이어 창 크기
-            val playerWidth = layout.width
-            val playerHeight = layout.height
-            
-            // 영상 크기는 VLC에서 직접 가져오기 어려움
-            // 대신 실제 렌더링 크기 확인
-            val videoWidth = 0  // VLC API 한계로 임시값
-            val videoHeight = 0
-            
-            Log.d(TAG, "========== 크기 정보 ==========")
-            Log.d(TAG, "플레이어 창: ${playerWidth} x ${playerHeight}")
-            Log.d(TAG, "VLC 레이아웃: ${layout.scaleX}x, ${layout.scaleY}x")
-            
-            if (playerWidth > 0 && playerHeight > 0) {
-                val playerRatio = playerWidth.toFloat() / playerHeight.toFloat()
-                Log.d(TAG, "플레이어 비율: %.2f".format(playerRatio))
-                
-                if (playerRatio > 1.5) {
-                    Log.d(TAG, "가로형 플레이어")
-                } else if (playerRatio < 0.8) {
-                    Log.d(TAG, "세로형 플레이어")
-                } else {
-                    Log.d(TAG, "정사각형 플레이어")
-                }
-            }
-            Log.d(TAG, "=============================")
         }
     }
 } 
