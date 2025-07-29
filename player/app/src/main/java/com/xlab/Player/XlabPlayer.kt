@@ -39,6 +39,13 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private var originalLayoutParams: ViewGroup.LayoutParams? = null
     private var fullscreenButton: Any? = null
     private var fullscreenContainer: FrameLayout? = null
+    
+    // 녹화 관련
+    private var recordButton: XLABPlayerButton? = null
+    private var isRecording = false
+    
+    // 사진 촬영 관련
+    private var captureButton: XLABPlayerButton? = null
 
     // Configuration 변경 감지
     private var configurationReceiver: BroadcastReceiver? = null
@@ -114,6 +121,16 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                     connect(object : C12PTZController.ConnectionCallback {
                         override fun onSuccess(message: String) {
                             android.util.Log.d("XLABPlayer", "C12 PTZ 연결 성공: $message")
+                            
+                            // 연결 성공 후 녹화 해상도를 최대(4K)로 설정
+                            setVideoResolution(3, object : C12PTZController.ResolutionCallback {
+                                override fun onSuccess(resolution: Int, message: String) {
+                                    android.util.Log.d("XLABPlayer", "C12 해상도 설정 성공: $message")
+                                }
+                                override fun onError(error: String) {
+                                    android.util.Log.w("XLABPlayer", "C12 해상도 설정 실패: $error")
+                                }
+                            })
                         }
                         override fun onError(error: String) {
                             android.util.Log.w("XLABPlayer", "C12 PTZ 연결 실패: $error")
@@ -362,7 +379,22 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 return false
             }
             
-            libVLC = LibVLC(context, arrayListOf("--intf=dummy", "--network-caching=0", "--no-audio"))
+            libVLC = LibVLC(context, arrayListOf(
+                "--intf=dummy",
+                "--network-caching=300",  // 0에서 300으로 증가 (안정성)
+                "--no-audio",
+                "--rtsp-caching=0",
+                "--drop-late-frames",
+                "--skip-frames", 
+                "--avcodec-fast",
+                "--live-caching=0",
+                "--codec=avcodec",
+                "--avcodec-hw=any",
+                "--no-stats",
+                "--no-osd",
+                //"--rtsp-tcp",
+                "--avcodec-threads=0"
+            ))
             mediaPlayer = MediaPlayer(libVLC)
 
             videoLayout?.let { parent.removeView(it) }
@@ -437,7 +469,17 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             try { media?.release() } catch (e: Exception) { }
             media = null
             
-            media = Media(libVLC, Uri.parse(url)).apply { addOption(":network-caching=1000") }
+            media = Media(libVLC, Uri.parse(url)).apply { 
+                addOption(":network-caching=0")  // 안정적인 캐싱 값
+                addOption(":no-audio")
+                 addOption(":rtsp-caching=0")
+                 addOption(":live-caching=0")
+                 addOption(":clock-jitter=0")
+                 addOption(":clock-synchro=0")
+                // addOption(":rtsp-tcp")
+                 addOption(":avcodec-fast")
+                 addOption(":avcodec-skiploopfilter=all")
+            }
             mediaPlayer?.media = media
             mediaPlayer?.play()
             
@@ -479,18 +521,47 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     fun disconnect(): Boolean {
         return try {
             stop()
+            
+            // disconnect는 비디오 연결만 해제, PTZ는 유지
+            // (PTZ는 release()에서만 해제)
+            
             try { media?.release() } catch (e: Exception) { }
             media = null
             isConnected = false
             currentUrl = ""
+            android.util.Log.d("XLABPlayer", "비디오 연결 해제됨 (PTZ 연결 유지)")
             true
         } catch (e: Exception) { false }
+    }
+    
+    /**
+     * PTZ 연결만 해제 (필요시 수동 호출)
+     */
+    fun disconnectPTZ(): Boolean {
+        return try {
+            ptzController?.disconnect()
+            ptzController = null
+            android.util.Log.d("XLABPlayer", "PTZ 연결 해제됨")
+            true
+        } catch (e: Exception) {
+            android.util.Log.w("XLABPlayer", "PTZ 해제 중 오류: ${e.message}")
+            false
+        }
     }
 
     fun release() {
         try {
             if (isFullscreen) exitFullscreen()
             hidePtzControl()
+            
+            // PTZ 컨트롤러 연결 해제 (중요!)
+            try {
+                ptzController?.disconnect()
+                ptzController = null
+                android.util.Log.d("XLABPlayer", "PTZ 컨트롤러 연결 해제 완료")
+            } catch (e: Exception) {
+                android.util.Log.w("XLABPlayer", "PTZ 컨트롤러 해제 중 오류: ${e.message}")
+            }
             
             try {
                 if (isReceiverRegistered && configurationReceiver != null) {
@@ -828,6 +899,157 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY).also {
             it.setAsFullscreenButton("⧈")
             fullscreenButton = it
+        }
+    }
+    
+    /**
+     * 녹화 버튼 추가 (왼쪽 아래 빨간색 원형)
+     */
+    fun addRecordButton(): XLABPlayerButton {
+        parentViewGroup?.let { parent ->
+            val recordBtn = XLABPlayerButton.create(context, "●", XLABPlayerButton.ButtonType.DANGER) {
+                toggleRecording()
+            }
+            
+            // 녹화 버튼 스타일 적용
+            recordBtn.setAsRecordButton()
+            
+            // 왼쪽 아래 위치 설정
+            recordBtn.setFrameLayoutMargin(FULLSCREEN_BUTTON_MARGIN, 0, 0, FULLSCREEN_BUTTON_MARGIN, 
+                android.view.Gravity.START or android.view.Gravity.BOTTOM)
+            
+            parent.addView(recordBtn.buttonView)
+            recordButton = recordBtn
+            
+            return recordBtn
+        }
+        
+        // parentViewGroup이 null인 경우 기본 방식 사용
+        return XLABPlayerButton.create(context, "●", XLABPlayerButton.ButtonType.DANGER).also {
+            it.setAsRecordButton()
+            recordButton = it
+        }
+    }
+    
+    /**
+     * 사진 촬영 버튼 추가 (녹화 버튼 오른쪽)
+     */
+    fun addCaptureButton(): XLABPlayerButton {
+        parentViewGroup?.let { parent ->
+            val captureBtn = XLABPlayerButton.create(context, "📷", XLABPlayerButton.ButtonType.WARNING) {
+                capturePhoto()
+            }
+            
+            // 사진 촬영 버튼 스타일 적용
+            captureBtn.setAsCaptureButton()
+            
+            // 녹화 버튼 오른쪽에 위치 설정 (왼쪽에서 두 번째)
+            val buttonWidth = 40 // 버튼 크기
+            val margin = FULLSCREEN_BUTTON_MARGIN
+            val leftMargin = margin + buttonWidth + 10 // 녹화 버튼 크기 + 간격
+            
+            captureBtn.setFrameLayoutMargin(leftMargin, 0, 0, margin, 
+                android.view.Gravity.START or android.view.Gravity.BOTTOM)
+            
+            parent.addView(captureBtn.buttonView)
+            captureButton = captureBtn
+            
+            return captureBtn
+        }
+        
+        // parentViewGroup이 null인 경우 기본 방식 사용
+        return XLABPlayerButton.create(context, "📷", XLABPlayerButton.ButtonType.WARNING).also {
+            it.setAsCaptureButton()
+            captureButton = it
+        }
+    }
+    
+    /**
+     * 녹화 토글
+     */
+    private fun toggleRecording() {
+        isRecording = !isRecording
+        updateRecordButtonState()
+        
+        if (isRecording) {
+            startRecording()
+        } else {
+            stopRecording()
+        }
+    }
+    
+    /**
+     * 녹화 시작
+     */
+    private fun startRecording() {
+        ptzController?.startRecording(object : C12PTZController.RecordingCallback {
+            override fun onSuccess(message: String) {
+                android.util.Log.d("XLABPlayer", "녹화 시작 성공: $message")
+                playerCallback?.onPtzCommand("RECORD_START", true)
+
+            }
+            
+            override fun onError(error: String) {
+                android.util.Log.w("XLABPlayer", "녹화 시작 실패: $error")
+                playerCallback?.onPtzCommand("RECORD_START", false)
+            }
+        })
+    }
+    
+    /**
+     * 녹화 중지
+     */
+    private fun stopRecording() {
+        ptzController?.stopRecording(object : C12PTZController.RecordingCallback {
+            override fun onSuccess(message: String) {
+                android.util.Log.d("XLABPlayer", "녹화 중지 성공: $message")
+                playerCallback?.onPtzCommand("RECORD_STOP", true)
+            }
+            
+            override fun onError(error: String) {
+                android.util.Log.w("XLABPlayer", "녹화 중지 실패: $error")
+                playerCallback?.onPtzCommand("RECORD_STOP", false)
+            }
+        })
+    }
+    
+    /**
+     * 사진 촬영
+     */
+    private fun capturePhoto() {
+        ptzController?.capturePhoto(object : C12PTZController.RecordingCallback {
+            override fun onSuccess(message: String) {
+                android.util.Log.d("XLABPlayer", "사진 촬영 성공: $message")
+                playerCallback?.onPtzCommand("CAPTURE_PHOTO", true)
+                
+                // 사진 촬영 성공 시 버튼 깜빡임 효과
+                captureButton?.let { button ->
+                    button.buttonView.alpha = 0.3f
+                    button.buttonView.postDelayed({
+                        button.buttonView.alpha = 1.0f
+                    }, 200)
+                }
+            }
+            
+            override fun onError(error: String) {
+                android.util.Log.w("XLABPlayer", "사진 촬영 실패: $error")
+                playerCallback?.onPtzCommand("CAPTURE_PHOTO", false)
+            }
+        })
+    }
+    
+    /**
+     * 녹화 버튼 상태 업데이트
+     */
+    private fun updateRecordButtonState() {
+        recordButton?.let { button ->
+            if (isRecording) {
+                button.setText("■")  // 정지 아이콘
+                button.setAsRecordButtonRecording()
+            } else {
+                button.setText("●")  // 녹화 아이콘
+                button.setAsRecordButton()
+            }
         }
     }
     

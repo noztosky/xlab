@@ -1091,10 +1091,35 @@ class C12PTZController {
         }
     }
     
+    // ===== D류 녹화 관련 콜백 인터페이스 =====
+    
+    interface RecordingCallback {
+        fun onSuccess(message: String)
+        fun onError(error: String)
+    }
+    
+    interface RecordingStatusCallback {
+        fun onSuccess(isRecording: Boolean, message: String)
+        fun onError(error: String)
+    }
+    
+    interface ResolutionCallback {
+        fun onSuccess(resolution: Int, message: String)
+        fun onError(error: String)
+    }
+    
+    interface SDCardCallback {
+        fun onSuccess(capacity: String, message: String)
+        fun onError(error: String)
+    }
+    
+    // ===== 1. 녹화 (录像) =====
+    
     /**
-     * 녹화 시작
+     * 녹화 시작 명령
+     * 제어위: w, 표식위: REC, 데이터위: 01
      */
-    fun startRecording(callback: PTZMoveCallback? = null) {
+    fun startRecording(callback: RecordingCallback? = null) {
         if (cameraHost == null || !isConnected) {
             callback?.onError("카메라가 연결되지 않았습니다")
             return
@@ -1102,12 +1127,14 @@ class C12PTZController {
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val command = "RECORD_START"
-                val success = sendUDPCommand(command)
+                val command = "#TPUD2wREC01"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
                 
                 withContext(Dispatchers.Main) {
                     if (success) {
-                        callback?.onSuccess("녹화 시작됨")
+                        callback?.onSuccess("녹화 시작 명령 전송됨")
                     } else {
                         callback?.onError("녹화 시작 실패")
                     }
@@ -1121,9 +1148,10 @@ class C12PTZController {
     }
     
     /**
-     * 녹화 정지
+     * 녹화 정지 명령
+     * 제어위: w, 표식위: REC, 데이터위: 00
      */
-    fun stopRecording(callback: PTZMoveCallback? = null) {
+    fun stopRecording(callback: RecordingCallback? = null) {
         if (cameraHost == null || !isConnected) {
             callback?.onError("카메라가 연결되지 않았습니다")
             return
@@ -1131,12 +1159,14 @@ class C12PTZController {
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val command = "RECORD_STOP"
-                val success = sendUDPCommand(command)
+                val command = "#TPUD2wREC00"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
                 
                 withContext(Dispatchers.Main) {
                     if (success) {
-                        callback?.onSuccess("녹화 정지됨")
+                        callback?.onSuccess("녹화 정지 명령 전송됨")
                     } else {
                         callback?.onError("녹화 정지 실패")
                     }
@@ -1148,13 +1178,12 @@ class C12PTZController {
             }
         }
     }
-        
-
     
     /**
-     * 사진 촬영
+     * 녹화 상태 확인 명령
+     * 제어위: w, 표식위: REC, 데이터위: 0A
      */
-    fun capturePhoto(callback: PTZMoveCallback? = null) {
+    fun checkRecordingStatus(callback: RecordingStatusCallback? = null) {
         if (cameraHost == null || !isConnected) {
             callback?.onError("카메라가 연결되지 않았습니다")
             return
@@ -1162,12 +1191,82 @@ class C12PTZController {
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val command = "PHOTO_CAPTURE"
-                val success = sendUDPCommand(command)
+                val command = "#TPUD2wREC0A"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
                 
                 withContext(Dispatchers.Main) {
                     if (success) {
-                        callback?.onSuccess("사진 촬영 완료")
+                        callback?.onSuccess(false, "녹화 상태 확인 명령 전송됨")
+                    } else {
+                        callback?.onError("녹화 상태 확인 실패")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("녹화 상태 확인 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    /**
+     * 녹화 상태 조회 명령
+     * 제어위: r, 표식위: REC, 데이터위: 00
+     */
+    fun getRecordingStatus(callback: RecordingStatusCallback? = null) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val command = "#TPUD2rREC00"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        callback?.onSuccess(false, "녹화 상태 조회 명령 전송됨")
+                    } else {
+                        callback?.onError("녹화 상태 조회 실패")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("녹화 상태 조회 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+        
+
+    
+    // ===== 2. 사진촬영 (拍照) =====
+    
+    /**
+     * 사진 촬영 명령
+     * 제어위: w, 표식위: CAP, 데이터위: 01
+     */
+    fun capturePhoto(callback: RecordingCallback? = null) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val command = "#TPUD2wCAP01"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        callback?.onSuccess("사진 촬영 명령 전송됨")
                     } else {
                         callback?.onError("사진 촬영 실패")
                     }
@@ -1177,6 +1276,141 @@ class C12PTZController {
                     callback?.onError("사진 촬영 중 오류: ${e.message}")
                 }
             }
+        }
+    }
+    
+    // ===== 3. 녹화 분해능 설정 (录像分辨率) =====
+    
+    /**
+     * 녹화 해상도 설정 명령
+     * 제어위: w, 표식위: VID, 데이터위: XoXi
+     * @param resolution 0: 720p, 1: 1080p, 2: 2k, 3: 4k
+     */
+    fun setVideoResolution(resolution: Int, callback: ResolutionCallback? = null) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        val resolutionCode = when (resolution) {
+            0 -> "00"  // 720p
+            1 -> "01"  // 1080p
+            2 -> "02"  // 2k
+            3 -> "03"  // 4k
+            else -> {
+                callback?.onError("유효하지 않은 해상도입니다 (0: 720p, 1: 1080p, 2: 2k, 3: 4k)")
+                return
+            }
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val command = "#TPUD2wVID$resolutionCode"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        val resolutionName = when (resolution) {
+                            0 -> "720p"
+                            1 -> "1080p"
+                            2 -> "2K"
+                            3 -> "4K"
+                            else -> "Unknown"
+                        }
+                        callback?.onSuccess(resolution, "해상도 $resolutionName 설정 명령 전송됨")
+                    } else {
+                        callback?.onError("해상도 설정 실패")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("해상도 설정 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    /**
+     * 녹화 해상도 조회 명령
+     * 제어위: r, 표식위: VID, 데이터위: 00
+     */
+    fun getVideoResolution(callback: ResolutionCallback? = null) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val command = "#TPUD2rVID00"
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        callback?.onSuccess(-1, "해상도 조회 명령 전송됨")
+                    } else {
+                        callback?.onError("해상도 조회 실패")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("해상도 조회 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    // ===== 4. 내장 메모리 용량 (内存卡容量) =====
+    
+    /**
+     * 메모리 카드 용량 조회 명령
+     * 제어위: r, 표식위: SDC, 데이터위: x1x2
+     */
+    fun getSDCardCapacity(callback: SDCardCallback? = null) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val command = "#TPUD2rSDC00"  // x1x2 값은 문서에서 명시되지 않음
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        callback?.onSuccess("", "SD카드 용량 조회 명령 전송됨")
+                    } else {
+                        callback?.onError("SD카드 용량 조회 실패")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("SD카드 용량 조회 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    // ===== 응답 해석 함수들 =====
+    
+    /**
+     * 녹화 상태 응답 해석
+     * @param response 카메라 응답 (예: #TPUD2rREC001E)
+     * @return true: 녹화 중(1), false: 녹화 안함(0)
+     */
+    fun parseRecordingStatusResponse(response: String): Boolean {
+        return if (response.length >= 12) {
+            val statusChar = response[11]  // X2 위치
+            statusChar == '1'
+        } else {
+            false
         }
     }
 

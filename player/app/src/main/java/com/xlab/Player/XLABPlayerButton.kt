@@ -227,6 +227,86 @@ class XLABPlayerButton(
     }
 
     /**
+     * 녹화 버튼 스타일 (빨간색 원형)
+     */
+    fun setAsRecordButton() {
+        buttonView.textSize = 16f
+        buttonView.setPadding(0, 0, 0, 0)
+        buttonView.setTextColor(Color.WHITE)
+        
+        // 빨간색 원형 배경
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL // 원형
+            setColor(Color.parseColor("#FF4444")) // 빨간색
+        }
+        
+        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#CC3333")) // 눌렸을 때 더 어두운 빨간색
+            })
+            addState(intArrayOf(), drawable)
+        }
+        
+        buttonView.background = stateDrawable
+        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#40000000"))
+    }
+
+    /**
+     * 녹화 중 버튼 스타일 (깜빡이는 효과)
+     */
+    fun setAsRecordButtonRecording() {
+        buttonView.textSize = 14f
+        buttonView.setPadding(0, 0, 0, 0)
+        buttonView.setTextColor(Color.WHITE)
+        
+        // 녹화 중 - 더 진한 빨간색 사각형
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 4f // 약간 둥근 사각형
+            setColor(Color.parseColor("#DD0000")) // 더 진한 빨간색
+        }
+        
+        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 4f
+                setColor(Color.parseColor("#AA0000"))
+            })
+            addState(intArrayOf(), drawable)
+        }
+        
+        buttonView.background = stateDrawable
+        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#40000000"))
+    }
+
+    /**
+     * 사진 촬영 버튼 스타일 (파란색 원형)
+     */
+    fun setAsCaptureButton() {
+        buttonView.textSize = 14f
+        buttonView.setPadding(0, 0, 0, 0)
+        buttonView.setTextColor(Color.WHITE)
+        
+        // 파란색 원형 배경
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.parseColor("#2196F3")) // 파란색
+        }
+        
+        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#1976D2")) // 누를 때 더 진한 파란색
+            })
+            addState(intArrayOf(), drawable)
+        }
+        
+        buttonView.background = stateDrawable
+        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#40000000"))
+    }
+
+    /**
      * 버튼 크기 변경
      */
     fun setSize(widthDp: Int, heightDp: Int) {

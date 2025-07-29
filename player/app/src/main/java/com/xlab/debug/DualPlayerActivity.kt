@@ -125,6 +125,8 @@ class DualPlayerActivity : AppCompatActivity() {
                 Toast.makeText(this, "플레이어1 초기화 실패", Toast.LENGTH_LONG).show()
             } else {
                 xlabPlayer1?.addFullscreenButton()
+                xlabPlayer1?.addRecordButton()
+                xlabPlayer1?.addCaptureButton()
                 xlabPlayer1?.setCameraServer("c12", "http://192.168.144.108:5000", 1)
                 xlabPlayer1?.showPtzControl()
             }
@@ -135,12 +137,13 @@ class DualPlayerActivity : AppCompatActivity() {
     }
     
     /**
-     * 두 번째 플레이어 설정
+     * 두 번째 플레이어 초기화 및 설정
      */
     private fun setupPlayer2() {
         try {
             xlabPlayer2 = XLABPlayer(this)
             
+            // 두 번째 플레이어 콜백 설정
             xlabPlayer2?.setCallback(object : XLABPlayer.PlayerCallback {
                 override fun onPlayerReady() {
                     runOnUiThread { updateButtonStates2() }
@@ -165,7 +168,7 @@ class DualPlayerActivity : AppCompatActivity() {
                 override fun onPlayerError(error: String) {
                     runOnUiThread {
                         updateButtonStates2()
-                        Toast.makeText(this@DualPlayerActivity, "플레이어2 오류: $error", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@DualPlayerActivity, "플레이어2 오류: $error", Toast.LENGTH_LONG).show()
                     }
                 }
                 
@@ -178,18 +181,22 @@ class DualPlayerActivity : AppCompatActivity() {
                 }
             })
             
+            // 두 번째 플레이어 초기화
             val success = xlabPlayer2?.initialize(videoContainer2) ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어2 초기화 실패", Toast.LENGTH_LONG).show()
-            } else {
+            if (success) {
                 xlabPlayer2?.addFullscreenButton()
-                // 두 번째 스트림 URL (다른 스트림 또는 동일 스트림의 다른 채널)
-                xlabPlayer2?.setCameraServer("c12", "http://192.168.144.108:5000", 2)
+                xlabPlayer2?.addRecordButton()
+                xlabPlayer2?.addCaptureButton()
                 xlabPlayer2?.showPtzControl()
+                
+                // 카메라 서버 설정
+                xlabPlayer2?.setCameraServer("c12", "http://192.168.144.108:5000", 2)
+            } else {
+                Toast.makeText(this, "플레이어2 초기화 실패", Toast.LENGTH_LONG).show()
             }
             
         } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 설정 실패", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "플레이어2 설정 실패: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
     
@@ -219,12 +226,13 @@ class DualPlayerActivity : AppCompatActivity() {
     // 첫 번째 플레이어 제어 메서드들
     private fun connectPlayer1() {
         try {
-            val success = xlabPlayer1?.connectAndPlay() ?: false
+            // 첫 번째 플레이어는 기본 주소 사용
+            val success = xlabPlayer1?.connectAndPlay("rtsp://192.168.144.108:554/stream=1") ?: false
             if (!success) {
                 Toast.makeText(this, "플레이어1 연결 실패", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 연결 실패", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "플레이어1 연결 오류: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -275,12 +283,13 @@ class DualPlayerActivity : AppCompatActivity() {
     // 두 번째 플레이어 제어 메서드들
     private fun connectPlayer2() {
         try {
+            // 두 번째 플레이어는 555 포트 사용
             val success = xlabPlayer2?.connectAndPlay("rtsp://192.168.144.108:555/stream=2") ?: false
             if (!success) {
                 Toast.makeText(this, "플레이어2 연결 실패", Toast.LENGTH_SHORT).show()
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 연결 실패", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "플레이어2 연결 오류: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
     

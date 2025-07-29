@@ -145,6 +145,10 @@ class TestPlayerActivity : AppCompatActivity() {
                 // 전체화면 버튼 추가 (비디오 위에 오버레이)
                 xlabPlayer?.addFullscreenButton()
                 
+                // 녹화 및 사진 촬영 버튼 추가
+                xlabPlayer?.addRecordButton()
+                xlabPlayer?.addCaptureButton()
+                
                 // 카메라 서버 설정 (C12 카메라)
                 xlabPlayer?.setCameraServer("c12", "http://192.168.144.108:5000", 1)
                 
