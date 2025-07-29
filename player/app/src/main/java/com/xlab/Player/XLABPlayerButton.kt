@@ -54,7 +54,7 @@ class XLABPlayerButton(
             
             // 레이아웃 파라미터 설정
             val params = LinearLayout.LayoutParams(
-                dpToPx(120), // 기본 너비 120dp
+                dpToPx(40), // 기본 너비 120dp
                 dpToPx(40)   // 기본 높이 40dp
             ).apply {
                 setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
@@ -179,7 +179,7 @@ class XLABPlayerButton(
         // PTZ 전용 배경 (둥근 모서리, 반투명)
         val drawable = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = 40f // 18f → 40f (큰 버튼에 맞게)
+            cornerRadius = 8f // 둥근 모서리 적용
             setColor(Color.parseColor("#80444444"))
         }
         
@@ -187,7 +187,7 @@ class XLABPlayerButton(
         val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadius = 40f // 18f → 40f
+                cornerRadius = 8f // 둥근 모서리 적용
                 setColor(Color.parseColor("#80666666"))
             })
             addState(intArrayOf(), drawable)
@@ -206,6 +206,20 @@ class XLABPlayerButton(
         buttonView.layoutParams = params
     }
     
+    /**
+     * FrameLayout용 마진 설정
+     */
+    fun setFrameLayoutMargin(leftDp: Int, topDp: Int, rightDp: Int, bottomDp: Int, gravity: Int) {
+        val params = android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            gravity
+        ).apply {
+            setMargins(dpToPx(leftDp), dpToPx(topDp), dpToPx(rightDp), dpToPx(bottomDp))
+        }
+        buttonView.layoutParams = params
+    }
+
     /**
      * 버튼 마진 설정
      */

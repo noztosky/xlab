@@ -48,6 +48,9 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private var ptzContainer: FrameLayout? = null
     private var isPtzVisible = false
     private var currentCameraId = 1
+    
+    // 전체화면 버튼 마진 상수 (픽셀 단위)
+    private val FULLSCREEN_BUTTON_MARGIN = 10
     private var currentCameraController: CameraController? = null
     private var currentCameraInfo: CameraInfo? = null
     private var ptzController: C12PTZController? = null // C12 전용 컨트롤러
@@ -218,8 +221,8 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private fun createPtzButtons(container: RelativeLayout) {
         val centerX = 175 // 중심 X 좌표
         val centerY = 175 // 중심 Y 좌표
-        val buttonSize = 80 // 개별 버튼 크기
-        val distance = 120 // 버튼 중심 간 거리 (적당한 간격)
+        val buttonSize = 88 // 개별 버튼 크기 (80 → 88, 10% 증가)
+        val distance = 132 // 버튼 중심 간 거리 (88/2 + 5px 간격 + 88/2 = 132)
         
         val callback = object : C12PTZController.PTZMoveCallback {
             override fun onSuccess(message: String) {
@@ -233,27 +236,27 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
         
         // 위쪽 버튼 (UP) - 틸트 증가
-        createPtzButton(container, "↑", centerX, centerY - distance) {
+        createPtzButton(container, "↑", centerX, centerY - distance, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(0f, 10f, callback) }
         }
         
         // 아래쪽 버튼 (DOWN) - 틸트 감소
-        createPtzButton(container, "↓", centerX, centerY + distance) {
+        createPtzButton(container, "↓", centerX, centerY + distance, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(0f, -10f, callback) }
         }
         
         // 왼쪽 버튼 (LEFT) - 팬 감소
-        createPtzButton(container, "←", centerX - distance, centerY) {
+        createPtzButton(container, "←", centerX - distance, centerY, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(-10f, 0f, callback) }
         }
         
         // 오른쪽 버튼 (RIGHT) - 팬 증가
-        createPtzButton(container, "→", centerX + distance, centerY) {
+        createPtzButton(container, "→", centerX + distance, centerY, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(10f, 0f, callback) }
         }
         
         // 중앙 홈 버튼 (HOME)
-        createPtzButton(container, "⌂", centerX, centerY) {
+        createPtzButton(container, "⌂", centerX, centerY, buttonSize) {
             ensurePtzConnection { ptzController?.moveToHome(callback) }
         }
     }
@@ -292,6 +295,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         text: String,
         x: Int,
         y: Int,
+        buttonSize: Int,
         onClick: () -> Unit
     ) {
         val ptzButton = XLABPlayerButton.create(
@@ -304,7 +308,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             setAsPtzButton()
         }
         
-        val buttonSize = 80 // 개별 버튼 크기
         val layoutParams = RelativeLayout.LayoutParams(buttonSize, buttonSize).apply {
             leftMargin = x - buttonSize / 2
             topMargin = y - buttonSize / 2
@@ -677,13 +680,13 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         textSize = 20f
                         setTextColor(android.graphics.Color.WHITE)
                         setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        setPadding(16, 16, 16, 16)
+                        setPadding(8, 8, 8, 8)
                         setOnClickListener { exitFullscreen() }
                     }, FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         Gravity.END or Gravity.TOP
-                    ).apply { setMargins(0, 20, 20, 0) })
+                    ).apply { setMargins(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0) })
                     
                     // PTZ 컨트롤이 보이는 상태에서만 전체화면에 추가
                     if (isPtzVisible) {
@@ -761,28 +764,54 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     
     fun addFullscreenButton(): XLABPlayerButton {
         parentViewGroup?.let { parent ->
-            if (parent is FrameLayout) {
-                val button = android.widget.Button(parent.context).apply {
-                    text = "⧈"
-                    textSize = 16f
-                    setTextColor(android.graphics.Color.WHITE)
-                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                    setPadding(8, 8, 8, 8)
-                    setOnClickListener { toggleFullscreen() }
-                    layoutParams = FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        android.view.Gravity.END or android.view.Gravity.TOP
-                    ).apply { setMargins(0, 10, 10, 0) }
+            // FrameLayout인 경우 직접 android.widget.Button 생성
+            val button = android.widget.Button(parent.context).apply {
+                text = "⧈"
+                textSize = 14f
+                setTextColor(android.graphics.Color.WHITE)
+                setPadding(4, 4, 4, 4)
+                setOnClickListener { toggleFullscreen() }
+                
+                // PTZ 버튼과 동일한 스타일 적용 (둥근 모서리, 50% 투명도)
+                val drawable = android.graphics.drawable.GradientDrawable().apply {
+                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                    cornerRadius = 8f // 둥근 모서리
+                    setColor(android.graphics.Color.parseColor("#80444444")) // PTZ와 같은 투명도
                 }
                 
-                parent.addView(button)
-                fullscreenButton = SimpleFullscreenButton(button)
-                return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY)
+                val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+                    addState(intArrayOf(android.R.attr.state_pressed), android.graphics.drawable.GradientDrawable().apply {
+                        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+                        cornerRadius = 8f
+                        setColor(android.graphics.Color.parseColor("#80666666"))
+                    })
+                    addState(intArrayOf(), drawable)
+                }
+                
+                background = stateDrawable
+                setShadowLayer(3f, 2f, 2f, android.graphics.Color.parseColor("#40000000"))
             }
+            
+            // FrameLayout.LayoutParams를 직접 설정 (정사각형 크기)
+            val buttonSize = 80 // 80px 정사각형
+            val layoutParams = FrameLayout.LayoutParams(
+                buttonSize,
+                buttonSize,
+                android.view.Gravity.END or android.view.Gravity.TOP
+            ).apply { 
+                setMargins(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0) 
+            }
+            button.layoutParams = layoutParams
+            
+            parent.addView(button)
+            fullscreenButton = SimpleFullscreenButton(button)
+            
+            // 더미 XLABPlayerButton 반환 (호환성을 위해)
+            return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY)
         }
         
-        return addButton("⧈", XLABPlayerButton.ButtonType.SECONDARY) { toggleFullscreen() }.also {
+        // parentViewGroup이 null인 경우 기본 방식 사용 (호환성)
+        return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY).also {
             it.setAsTransparentIconButton("⧈")
             fullscreenButton = it
         }
