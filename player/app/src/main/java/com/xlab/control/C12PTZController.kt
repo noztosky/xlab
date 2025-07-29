@@ -1,6 +1,5 @@
 package com.xlab.Player
 
-import android.util.Log
 import kotlinx.coroutines.*
 import java.net.*
 import java.io.IOException
@@ -14,8 +13,6 @@ import kotlin.coroutines.suspendCoroutine
 class C12PTZController {
     
     companion object {
-        private const val TAG = "C12PTZController"
-        
         // PTZ 각도 범위
         const val PAN_MIN = -180.0f
         const val PAN_MAX = 180.0f
@@ -99,7 +96,6 @@ class C12PTZController {
         this.timeout = timeout
         this.isConnected = false
         
-        Log.d(TAG, "C12 PTZ 제어기 설정 완료 (UDP): $host:$ptzPort")
         return this
     }
     
@@ -125,7 +121,7 @@ class C12PTZController {
             this.cameraInetAddress = InetAddress.getByName(uri.host)
             
         } catch (e: Exception) {
-            Log.w(TAG, "URL 파싱 실패, 기본값 사용: ${e.message}")
+            
         }
         
         this.username = username
@@ -133,7 +129,6 @@ class C12PTZController {
         this.timeout = timeout
         this.isConnected = false
         
-        Log.d(TAG, "C12 PTZ 제어기 설정 완료 (UDP URL): $cameraHost:$ptzPort")
         return this
     }
     
@@ -156,7 +151,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     isConnected = true
                     callback?.onSuccess("C12 카메라 UDP 연결 준비 완료")
-                    Log.d(TAG, "C12 UDP 연결 준비: $cameraHost:$ptzPort")
                 }
                 
             } catch (e: Exception) {
@@ -164,7 +158,6 @@ class C12PTZController {
                     isConnected = false
                     val errorMsg = "UDP 소켓 생성 실패: ${e.message}"
                     callback?.onError(errorMsg)
-                    Log.w(TAG, errorMsg)
                 }
             }
         }
@@ -190,9 +183,8 @@ class C12PTZController {
                         val finalCommand = "$shutdownCommand${String.format("%02X", crc)}"
                         
                         sendUDPCommand(finalCommand)
-                        Log.d(TAG, "카메라 정상 종료 신호 전송 완료")
                     } catch (e: Exception) {
-                        Log.w(TAG, "카메라 정상 종료 신호 전송 실패: ${e.message}")
+                        
                     }
                 }
             }
@@ -206,10 +198,10 @@ class C12PTZController {
                     if (!socket.isClosed) {
                         socket.close()
                     } else {
-                        Log.d(TAG, "UDP 소켓이 이미 닫혀있음")
+                        
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "UDP 소켓 종료 중 오류: ${e.message}")
+                    
                 }
             }
             udpSocket = null
@@ -218,10 +210,8 @@ class C12PTZController {
             cameraHost = null
             ptzPort = 0
             
-            Log.d(TAG, "카메라 UDP 연결 안전하게 해제됨")
-            
         } catch (e: Exception) {
-            Log.e(TAG, "연결 해제 중 오류: ${e.message}")
+            
             // 오류가 발생해도 강제로 정리
             isConnected = false
             udpSocket = null
@@ -239,7 +229,7 @@ class C12PTZController {
         val clampedAngle = angle.coerceIn(PAN_MIN, PAN_MAX)
         
         if (clampedAngle != angle) {
-            Log.w(TAG, "팬 각도가 범위를 벗어나 조정됨: $angle -> $clampedAngle")
+            
         }
         
         executePTZCommand("pan", clampedAngle) { success, message ->
@@ -260,7 +250,7 @@ class C12PTZController {
         val clampedAngle = angle.coerceIn(TILT_MIN, TILT_MAX)
         
         if (clampedAngle != angle) {
-            Log.w(TAG, "틸트 각도가 범위를 벗어나 조정됨: $angle -> $clampedAngle")
+            
         }
         
         executePTZCommand("tilt", clampedAngle) { success, message ->
@@ -281,7 +271,7 @@ class C12PTZController {
         val clampedLevel = level.coerceIn(ZOOM_MIN, ZOOM_MAX)
         
         if (clampedLevel != level) {
-            Log.w(TAG, "줌 레벨이 범위를 벗어나 조정됨: $level -> $clampedLevel")
+            
         }
         
         executePTZCommand("zoom", clampedLevel) { success, message ->
@@ -332,7 +322,6 @@ class C12PTZController {
                             currentTilt = clampedTilt
                         }
                         callback?.onSuccess("팬 ${clampedPan}°, 틸트 ${clampedTilt}° 설정 완료")
-                        Log.d(TAG, "팬/틸트 동시 설정 성공: pan=$clampedPan, tilt=$clampedTilt")
                     } else {
                         callback?.onError("팬/틸트 동시 설정 실패")
                     }
@@ -342,7 +331,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     val errorMsg = "팬/틸트 설정 중 오류: ${e.message}"
                     callback?.onError(errorMsg)
-                    Log.e(TAG, errorMsg, e)
                 }
             }
         }
@@ -394,8 +382,6 @@ class C12PTZController {
                     val newPan = currentPan - deltaPan
                     val newTilt = currentTilt + deltaTilt
 
-                    Log.d(TAG, "상대 이동: 델타(${deltaPan}, ${deltaTilt}) -> 새 위치(${newPan}, ${newTilt})")
-
                     // 성공 시 위치 업데이트하는 콜백
                     val updateCallback = object : PTZMoveCallback {
                         override fun onSuccess(message: String) {
@@ -418,33 +404,28 @@ class C12PTZController {
                     }
 
                     // 축별 개별 제어
-                    when {
-                        deltaPan == 0f && deltaTilt != 0f -> {
-                            Log.d(TAG, "틸트만 제어: ${newTilt}°")
-                            setTilt(newTilt, updateCallback)
-                        }
-                        deltaTilt == 0f && deltaPan != 0f -> {
-                            Log.d(TAG, "팬만 제어: ${newPan}°")
-                            setPan(newPan, updateCallback)
-                        }
-                        deltaPan != 0f && deltaTilt != 0f -> {
-                            Log.d(TAG, "팬/틸트 동시 제어: (${newPan}°, ${newTilt}°)")
-                            setPanTilt(newPan, newTilt, updateCallback)
-                        }
-                        else -> {
-                            Log.d(TAG, "이동 없음")
-                            CoroutineScope(Dispatchers.Main).launch {
-                                callback?.onSuccess("이동 없음")
+                                            when {
+                            deltaPan == 0f && deltaTilt != 0f -> {
+                                setTilt(newTilt, updateCallback)
                             }
-                            onCommandCompleted()
+                            deltaTilt == 0f && deltaPan != 0f -> {
+                                setPan(newPan, updateCallback)
+                            }
+                            deltaPan != 0f && deltaTilt != 0f -> {
+                                setPanTilt(newPan, newTilt, updateCallback)
+                            }
+                            else -> {
+                                CoroutineScope(Dispatchers.Main).launch {
+                                    callback?.onSuccess("이동 없음")
+                                }
+                                onCommandCompleted()
+                            }
                         }
-                    }
                     
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {
                         val errorMsg = "상대 이동 중 오류: ${e.message}"
                         callback?.onError(errorMsg)
-                        Log.e(TAG, errorMsg, e)
                     }
                     onCommandCompleted()
                 }
@@ -532,7 +513,6 @@ class C12PTZController {
                     if (success) {
                         // UDP에서는 상태 응답 파싱이 필요하지만 현재는 로컬 값 반환
                         callback?.onSuccess(currentPan, currentTilt, currentZoom)
-                        Log.d(TAG, "PTZ 상태 조회: pan=$currentPan, tilt=$currentTilt, zoom=$currentZoom")
                     } else {
                         callback?.onError("상태 조회 실패")
                     }
@@ -542,7 +522,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     val errorMsg = "상태 조회 중 오류: ${e.message}"
                     callback?.onError(errorMsg)
-                    Log.e(TAG, errorMsg, e)
                 }
             }
         }
@@ -586,7 +565,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("PTZ 이동 정지")
-                        Log.d(TAG, "PTZ 이동 정지 완료")
                     } else {
                         callback?.onError("PTZ 정지 실패")
                     }
@@ -637,7 +615,6 @@ class C12PTZController {
                     
                     withContext(Dispatchers.Main) {
                         callback?.invoke(success, message)
-                        Log.d(TAG, "$type 명령 결과: $message")
                     }
                 } else {
                     withContext(Dispatchers.Main) {
@@ -649,7 +626,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     val errorMsg = "$type 명령 중 오류: ${e.message}"
                     callback?.invoke(false, errorMsg)
-                    Log.e(TAG, errorMsg, e)
                 }
             }
         }
@@ -679,7 +655,6 @@ class C12PTZController {
         
         val finalCommand = "$command$crcHex"
         
-        Log.d(TAG, "C12 명령 생성: $axis ${angle}° -> $finalCommand")
         return finalCommand
     }
     
@@ -700,7 +675,7 @@ class C12PTZController {
     private fun sendUDPCommand(command: String): Boolean {
         return try {
             if (udpSocket == null || cameraInetAddress == null) {
-                Log.w(TAG, "UDP 소켓 또는 주소가 설정되지 않음")
+                
                 return false
             }
             
@@ -714,13 +689,12 @@ class C12PTZController {
             )
             
             udpSocket?.send(packet)
-            Log.d(TAG, "UDP 명령 전송: $command -> $cameraHost:$ptzPort")
             
             // C12 카메라는 응답하지 않으므로 송신 후 즉시 성공 반환
             return true
             
         } catch (e: Exception) {
-            Log.e(TAG, "UDP 명령 전송 실패: ${e.message}", e)
+            
             false
         }
     }
@@ -739,10 +713,9 @@ class C12PTZController {
             // currentTilt = json.getDouble("tilt").toFloat()
             // currentZoom = json.getDouble("zoom").toFloat()
             
-            Log.d(TAG, "PTZ 상태 응답: $response")
             
         } catch (e: Exception) {
-            Log.w(TAG, "PTZ 상태 파싱 실패, 기본값 사용: ${e.message}")
+            
         }
     }
     
@@ -772,7 +745,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess(presetId, "프리셋 $presetId 저장 완료")
-                        Log.d(TAG, "프리셋 $presetId 저장 성공")
                     } else {
                         callback?.onError("프리셋 $presetId 저장 실패")
                     }
@@ -807,7 +779,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess(presetId, "프리셋 $presetId 이동 완료")
-                        Log.d(TAG, "프리셋 $presetId 이동 성공")
                     } else {
                         callback?.onError("프리셋 $presetId 이동 실패")
                     }
@@ -842,7 +813,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess(presetId, "프리셋 $presetId 삭제 완료")
-                        Log.d(TAG, "프리셋 $presetId 삭제 성공")
                     } else {
                         callback?.onError("프리셋 $presetId 삭제 실패")
                     }
@@ -891,7 +861,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("연속 이동 시작: $direction")
-                        Log.d(TAG, "연속 이동 시작: $direction, 속도: $clampedSpeed")
                     } else {
                         callback?.onError("연속 이동 시작 실패")
                     }
@@ -921,7 +890,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("연속 이동 정지")
-                        Log.d(TAG, "연속 이동 정지 완료")
                     } else {
                         callback?.onError("연속 이동 정지 실패")
                     }
@@ -957,7 +925,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("순찰 시작: 프리셋 $presetList")
-                        Log.d(TAG, "순찰 시작: $presetList, 간격: ${intervalSeconds}초")
                     } else {
                         callback?.onError("순찰 시작 실패")
                     }
@@ -987,7 +954,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("순찰 정지 완료")
-                        Log.d(TAG, "순찰 정지 완료")
                     } else {
                         callback?.onError("순찰 정지 실패")
                     }
@@ -1019,7 +985,6 @@ class C12PTZController {
                     if (success) {
                         val msg = if (enabled) "자동 추적 시작" else "자동 추적 정지"
                         callback?.onSuccess(msg)
-                        Log.d(TAG, msg)
                     } else {
                         callback?.onError("자동 추적 설정 실패")
                     }
@@ -1051,7 +1016,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("PTZ 속도 설정: $clampedSpeed")
-                        Log.d(TAG, "PTZ 속도 설정 완료: $clampedSpeed")
                     } else {
                         callback?.onError("PTZ 속도 설정 실패")
                     }
@@ -1081,7 +1045,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("자동 포커스 완료")
-                        Log.d(TAG, "자동 포커스 완료")
                     } else {
                         callback?.onError("자동 포커스 실패")
                     }
@@ -1116,7 +1079,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("수동 포커스 $direction 완료")
-                        Log.d(TAG, "수동 포커스 $direction 완료")
                     } else {
                         callback?.onError("수동 포커스 실패")
                     }
@@ -1146,7 +1108,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("녹화 시작됨")
-                        Log.d(TAG, "녹화 시작됨")
                     } else {
                         callback?.onError("녹화 시작 실패")
                     }
@@ -1176,7 +1137,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("녹화 정지됨")
-                        Log.d(TAG, "녹화 정지됨")
                     } else {
                         callback?.onError("녹화 정지 실패")
                     }
@@ -1208,7 +1168,6 @@ class C12PTZController {
                 withContext(Dispatchers.Main) {
                     if (success) {
                         callback?.onSuccess("사진 촬영 완료")
-                        Log.d(TAG, "사진 촬영 완료")
                     } else {
                         callback?.onError("사진 촬영 실패")
                     }
@@ -1230,6 +1189,5 @@ class C12PTZController {
         currentPan = 0.0f
         currentTilt = 0.0f
         currentZoom = 1.0f
-        Log.d(TAG, "C12 PTZ 제어기 리소스 해제 완료")
     }
 } 
