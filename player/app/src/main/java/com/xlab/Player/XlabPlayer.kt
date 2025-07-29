@@ -670,6 +670,8 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         Gravity.CENTER
                     ))
+                    
+                    // 전체화면 종료 버튼 추가
                     addView(android.widget.Button(context).apply {
                         text = "⧉"
                         textSize = 20f
@@ -682,6 +684,14 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         Gravity.END or Gravity.TOP
                     ).apply { setMargins(0, 20, 20, 0) })
+                    
+                    // PTZ 컨트롤이 보이는 상태에서만 전체화면에 추가
+                    if (isPtzVisible) {
+                        ptzContainer?.let { ptzControl ->
+                            (ptzControl.parent as? ViewGroup)?.removeView(ptzControl)
+                            addView(ptzControl)
+                        }
+                    }
                 }
                 
                 (act.window.decorView as ViewGroup).addView(fullscreenContainer, FrameLayout.LayoutParams(
@@ -705,11 +715,25 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             fullscreenContainer?.let { container ->
                 videoLayout?.let { layout ->
                     container.removeView(layout)
+                    
+                    // PTZ 컨트롤이 보이는 상태였다면 전체화면에서 제거 후 원래 위치에 다시 생성
+                    if (isPtzVisible) {
+                        ptzContainer?.let { ptzControl ->
+                            container.removeView(ptzControl)
+                            ptzContainer = null // 기존 컨테이너 참조 제거
+                        }
+                    }
+                    
                     (act.window.decorView as ViewGroup).removeView(container)
                     
                     parentViewGroup?.let { parent ->
                         originalLayoutParams?.let { layout.layoutParams = it }
                         parent.addView(layout)
+                    }
+                    
+                    // PTZ 컨트롤이 보이는 상태였다면 원래 위치에 다시 생성
+                    if (isPtzVisible) {
+                        createPtzControl()
                     }
                     
                     layout.post {
