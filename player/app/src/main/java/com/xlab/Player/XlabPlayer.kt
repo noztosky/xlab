@@ -22,6 +22,7 @@ import org.videolan.libvlc.util.VLCVideoLayout
 import kotlin.math.min
 
 class XLABPlayer(private val context: Context) : LifecycleObserver {
+    // VLC 미디어 관련
     private var libVLC: LibVLC? = null
     private var mediaPlayer: MediaPlayer? = null
     private var media: Media? = null
@@ -29,32 +30,25 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private var parentViewGroup: ViewGroup? = null
     private var activity: Activity? = null
 
+    // 기본 상태 변수들
     private var isInitialized = false
     private var isPlaying = false
     private var isConnected = false
     private var currentUrl = ""
-    
-    // 전체화면 관련
     private var isFullscreen = false
+    private var isRecording = false
+    private var isPtzVisible = false
+    private var currentCameraId = 1
+    private var isReceiverRegistered = false
+    
+    // UI 컴포넌트들
     private var originalLayoutParams: ViewGroup.LayoutParams? = null
     private var fullscreenButton: Any? = null
     private var fullscreenContainer: FrameLayout? = null
-    
-    // 녹화 관련
     private var recordButton: XLABPlayerButton? = null
-    private var isRecording = false
-    
-    // 사진 촬영 관련
     private var captureButton: XLABPlayerButton? = null
-
-    // Configuration 변경 감지
-    private var configurationReceiver: BroadcastReceiver? = null
-    private var isReceiverRegistered = false
-
-    // PTZ 제어 관련
     private var ptzContainer: FrameLayout? = null
-    private var isPtzVisible = false
-    private var currentCameraId = 1
+    private var configurationReceiver: BroadcastReceiver? = null
     
     // 전체화면 버튼 마진 상수 (픽셀 단위)
     private val FULLSCREEN_BUTTON_MARGIN = 10
@@ -173,21 +167,16 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     /**
      * PTZ 컨트롤 표시/숨김 토글
      */
-    fun togglePtzControl() {
-        if (isPtzVisible) hidePtzControl() else showPtzControl()
-    }
+    fun togglePtzControl() = if (isPtzVisible) hidePtzControl() else showPtzControl()
 
     /**
      * PTZ 컨트롤 표시
      */
     fun showPtzControl() {
         if (ptzContainer != null || parentViewGroup == null) return
-        
-        parentViewGroup?.let { parent ->
-            if (parent is FrameLayout) {
-                createPtzControl()
-                isPtzVisible = true
-            }
+        (parentViewGroup as? FrameLayout)?.let {
+            createPtzControl()
+            isPtzVisible = true
         }
     }
 
@@ -875,93 +864,55 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     fun isInFullscreen(): Boolean = isFullscreen
     
     fun addFullscreenButton(): XLABPlayerButton {
+        val button = XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY, ::toggleFullscreen)
+        button.setAsFullscreenButton("⧈")
+        
         parentViewGroup?.let { parent ->
-            // XLABPlayerButton을 사용하여 간단하게 생성
-            val xlabButton = XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY) {
-                toggleFullscreen()
-            }
-            
-            // 전체화면 버튼 스타일 적용
-            xlabButton.setAsFullscreenButton("⧈")
-            
-            // FrameLayout용 마진과 크기 설정
-            xlabButton.setFrameLayoutMargin(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0, 
+            button.setFrameLayoutMargin(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0, 
                 android.view.Gravity.END or android.view.Gravity.TOP)
-            // setSize 호출을 제거 - setFrameLayoutMargin이 이미 LayoutParams를 설정하므로
-            
-            parent.addView(xlabButton.buttonView)
-            fullscreenButton = xlabButton
-            
-            return xlabButton
+            parent.addView(button.buttonView)
         }
         
-        // parentViewGroup이 null인 경우 기본 방식 사용 (호환성)
-        return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY).also {
-            it.setAsFullscreenButton("⧈")
-            fullscreenButton = it
-        }
+        fullscreenButton = button
+        return button
     }
     
     /**
      * 녹화 버튼 추가 (왼쪽 아래 빨간색 원형)
      */
     fun addRecordButton(): XLABPlayerButton {
+        val button = XLABPlayerButton.create(context, "●", XLABPlayerButton.ButtonType.DANGER, ::toggleRecording)
+        button.setAsRecordButton()
+        
         parentViewGroup?.let { parent ->
-            val recordBtn = XLABPlayerButton.create(context, "●", XLABPlayerButton.ButtonType.DANGER) {
-                toggleRecording()
-            }
-            
-            // 녹화 버튼 스타일 적용
-            recordBtn.setAsRecordButton()
-            
-            // 왼쪽 아래 위치 설정
-            recordBtn.setFrameLayoutMargin(FULLSCREEN_BUTTON_MARGIN, 0, 0, FULLSCREEN_BUTTON_MARGIN, 
+            button.setFrameLayoutMargin(FULLSCREEN_BUTTON_MARGIN, 0, 0, FULLSCREEN_BUTTON_MARGIN, 
                 android.view.Gravity.START or android.view.Gravity.BOTTOM)
-            
-            parent.addView(recordBtn.buttonView)
-            recordButton = recordBtn
-            
-            return recordBtn
+            parent.addView(button.buttonView)
         }
         
-        // parentViewGroup이 null인 경우 기본 방식 사용
-        return XLABPlayerButton.create(context, "●", XLABPlayerButton.ButtonType.DANGER).also {
-            it.setAsRecordButton()
-            recordButton = it
-        }
+        recordButton = button
+        return button
     }
     
     /**
      * 사진 촬영 버튼 추가 (녹화 버튼 오른쪽)
      */
     fun addCaptureButton(): XLABPlayerButton {
+        val button = XLABPlayerButton.create(context, "📷", XLABPlayerButton.ButtonType.WARNING, ::capturePhoto)
+        button.setAsCaptureButton()
+        
         parentViewGroup?.let { parent ->
-            val captureBtn = XLABPlayerButton.create(context, "📷", XLABPlayerButton.ButtonType.WARNING) {
-                capturePhoto()
-            }
-            
-            // 사진 촬영 버튼 스타일 적용
-            captureBtn.setAsCaptureButton()
-            
-            // 녹화 버튼 오른쪽에 위치 설정 (왼쪽에서 두 번째)
-            val buttonWidth = 40 // 버튼 크기
+            val buttonWidth = 40
             val margin = FULLSCREEN_BUTTON_MARGIN
-            val leftMargin = margin + buttonWidth + 10 // 녹화 버튼 크기 + 간격
+            val leftMargin = margin + buttonWidth + 10
             
-            captureBtn.setFrameLayoutMargin(leftMargin, 0, 0, margin, 
+            button.setFrameLayoutMargin(leftMargin, 0, 0, margin, 
                 android.view.Gravity.START or android.view.Gravity.BOTTOM)
-            
-            parent.addView(captureBtn.buttonView)
-            captureButton = captureBtn
-            
-            return captureBtn
+            parent.addView(button.buttonView)
         }
         
-        // parentViewGroup이 null인 경우 기본 방식 사용
-        return XLABPlayerButton.create(context, "📷", XLABPlayerButton.ButtonType.WARNING).also {
-            it.setAsCaptureButton()
-            captureButton = it
-        }
+        captureButton = button
+        return button
     }
     
     /**
