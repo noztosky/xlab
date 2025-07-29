@@ -614,8 +614,36 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         params.width = ViewGroup.LayoutParams.MATCH_PARENT
                         params.height = ViewGroup.LayoutParams.MATCH_PARENT
                         layout.layoutParams = params
-                        layout.scaleX = 2.0f
-                        layout.scaleY = 2.0f
+                        
+                        // 가로세로 비율을 유지하면서 화면을 가득 채우되 영상이 잘리지 않도록 조정
+                        layout.post {
+                            val containerWidth = layout.width.toFloat()
+                            val containerHeight = layout.height.toFloat()
+                            
+                            if (containerWidth > 0 && containerHeight > 0) {
+                                // 일반적인 비디오 비율 (16:9)을 기준으로 스케일 계산
+                                val videoAspectRatio = 16f / 9f  // 1.777...
+                                val containerAspectRatio = containerWidth / containerHeight
+                                
+                                // 화면을 가득 채우면서 영상이 잘리지 않도록 하는 스케일 계산
+                                val finalScale = if (containerAspectRatio > videoAspectRatio) {
+                                    // 컨테이너가 더 넓은 경우 - 세로를 기준으로 맞춤
+                                    containerHeight / (containerWidth / videoAspectRatio)
+                                } else {
+                                    // 컨테이너가 더 높은 경우 - 가로를 기준으로 맞춤
+                                    containerWidth / (containerHeight * videoAspectRatio)
+                                }
+                                
+                                // 적절한 범위로 제한
+                                val clampedScale = finalScale.coerceIn(1.2f, 2.5f)
+                                
+                                layout.scaleX = clampedScale
+                                layout.scaleY = clampedScale
+                            } else {
+                                layout.scaleX = 1.5f
+                                layout.scaleY = 1.5f
+                            }
+                        }
                     }
                 }
                 VideoScaleMode.FILL_WINDOW -> {

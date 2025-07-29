@@ -22,7 +22,6 @@ class TestPlayerActivity : AppCompatActivity() {
     
     // UI 컴포넌트들
     private lateinit var videoContainer: FrameLayout
-    private lateinit var statusText: TextView
     private lateinit var connectButton: Button
     private lateinit var playButton: Button
     private lateinit var pauseButton: Button
@@ -47,18 +46,14 @@ class TestPlayerActivity : AppCompatActivity() {
      */
     private fun initViews() {
         videoContainer = findViewById(R.id.video_container)
-        statusText = findViewById(R.id.status_text)
         connectButton = findViewById(R.id.connect_button)
         playButton = findViewById(R.id.play_button)
         pauseButton = findViewById(R.id.pause_button)
         stopButton = findViewById(R.id.stop_button)
         disconnectButton = findViewById(R.id.disconnect_button)
-
         
         // 비디오 컨테이너를 16:9 비율로 설정
         setupVideoContainerAspectRatio()
-        
-        updateStatus("플레이어 준비 중...")
     }
     
     /**
@@ -74,7 +69,7 @@ class TestPlayerActivity : AppCompatActivity() {
             layoutParams.height = videoHeight
             videoContainer.layoutParams = layoutParams
             
-            Log.d(TAG, "비디오 컨테이너 크기 설정: ${screenWidth}x${videoHeight}")
+
         }
     }
     
@@ -97,42 +92,36 @@ class TestPlayerActivity : AppCompatActivity() {
             xlabPlayer?.setCallback(object : XLABPlayer.PlayerCallback {
                 override fun onPlayerReady() {
                     runOnUiThread {
-                        updateStatus("플레이어 준비 완료")
                         updateButtonStates()
                     }
                 }
                 
                 override fun onPlayerConnected() {
                     runOnUiThread {
-                        updateStatus("RTSP 연결됨")
                         updateButtonStates()
                     }
                 }
                 
                 override fun onPlayerDisconnected() {
                     runOnUiThread {
-                        updateStatus("연결 해제됨")
                         updateButtonStates()
                     }
                 }
                 
                 override fun onPlayerPlaying() {
                     runOnUiThread {
-                        updateStatus("재생 중")
                         updateButtonStates()
                     }
                 }
                 
                 override fun onPlayerPaused() {
                     runOnUiThread {
-                        updateStatus("일시정지됨")
                         updateButtonStates()
                     }
                 }
                 
                 override fun onPlayerError(error: String) {
                     runOnUiThread {
-                        updateStatus("오류: $error")
                         updateButtonStates()
                         
                         Toast.makeText(this@TestPlayerActivity, "오류: $error", Toast.LENGTH_LONG).show()
@@ -140,24 +129,17 @@ class TestPlayerActivity : AppCompatActivity() {
                 }
                 
                 override fun onVideoSizeChanged(width: Int, height: Int) {
-                    runOnUiThread {
-                        Log.d(TAG, "비디오 크기 변경: ${width}x${height}")
-                    }
+                    // 비디오 크기 변경 처리 (필요시 구현)
                 }
                 
                 override fun onPtzCommand(command: String, success: Boolean) {
-                    runOnUiThread {
-                        val status = if (success) "성공" else "실패"
-                        Log.d(TAG, "PTZ 명령 $command: $status")
-                        Toast.makeText(this@TestPlayerActivity, "PTZ $command: $status", Toast.LENGTH_SHORT).show()
-                    }
+                    // PTZ 명령 처리 (필요시 Toast 표시)
                 }
             })
             
             // 플레이어 초기화
             val success = xlabPlayer?.initialize(videoContainer) ?: false
             if (!success) {
-                updateStatus("플레이어 초기화 실패")
                 Toast.makeText(this, "플레이어 초기화 실패", Toast.LENGTH_LONG).show()
             } else {
                 // 전체화면 버튼 추가 (비디오 위에 오버레이)
@@ -167,15 +149,11 @@ class TestPlayerActivity : AppCompatActivity() {
                 xlabPlayer?.setCameraServer("c12", "http://192.168.144.108:5000", 1)
                 
                 // PTZ 컨트롤을 기본적으로 표시
-                xlabPlayer?.showPtzControl()
-                
-                updateStatus("플레이어 준비 완료")
+                xlabPlayer?.showPtzControl()                
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "플레이어 설정 실패", e)
-            updateStatus("플레이어 설정 실패: ${e.message}")
-            Toast.makeText(this, "플레이어 설정 실패: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "플레이어 설정 실패", Toast.LENGTH_LONG).show()
         }
     }
     
@@ -212,18 +190,14 @@ class TestPlayerActivity : AppCompatActivity() {
      */
     private fun connectToStream() {
         try {
-            updateStatus("RTSP 연결 시도 중...")
             val success = xlabPlayer?.connectAndPlay() ?: false
             
             if (!success) {
-                updateStatus("연결 실패")
                 Toast.makeText(this, "RTSP 연결 실패", Toast.LENGTH_SHORT).show()
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "스트림 연결 실패", e)
-            updateStatus("연결 실패: ${e.message}")
-            Toast.makeText(this, "연결 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "연결 실패", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -239,8 +213,7 @@ class TestPlayerActivity : AppCompatActivity() {
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "스트림 재생 실패", e)
-            Toast.makeText(this, "재생 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "재생 실패", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -256,8 +229,7 @@ class TestPlayerActivity : AppCompatActivity() {
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "스트림 일시정지 실패", e)
-            Toast.makeText(this, "일시정지 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "일시정지 실패", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -273,8 +245,7 @@ class TestPlayerActivity : AppCompatActivity() {
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "스트림 정지 실패", e)
-            Toast.makeText(this, "정지 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "정지 실패", Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -290,50 +261,33 @@ class TestPlayerActivity : AppCompatActivity() {
             }
             
         } catch (e: Exception) {
-            Log.e(TAG, "스트림 연결 해제 실패", e)
-            Toast.makeText(this, "연결 해제 실패: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "연결 해제 실패", Toast.LENGTH_SHORT).show()
         }
     }
-
-
     
-    /**
-     * 상태 텍스트 업데이트
-     */
-    private fun updateStatus(status: String) {
-        statusText.text = "상태: $status"
-        Log.d(TAG, "상태 업데이트: $status")
-    }
-    
-
-
     /**
      * 버튼 상태 업데이트
      */
     private fun updateButtonStates() {
-        val isReady = xlabPlayer?.isPlayerReady() ?: false
-        val isConnected = xlabPlayer?.isPlayerConnected() ?: false
-        val isPlaying = xlabPlayer?.isPlayerPlaying() ?: false
-        
-        connectButton.isEnabled = isReady && !isConnected
-        playButton.isEnabled = isConnected && !isPlaying
-        pauseButton.isEnabled = isConnected && isPlaying
-        stopButton.isEnabled = isConnected
-        disconnectButton.isEnabled = isConnected
-
-        
-        Log.d(TAG, "버튼 상태 업데이트 - 준비: $isReady, 연결: $isConnected, 재생: $isPlaying")
+        xlabPlayer?.let { player ->
+            val isReady = player.isPlayerReady()
+            val isConnected = player.isPlayerConnected()
+            val isPlaying = player.isPlayerPlaying()
+            
+            connectButton.isEnabled = isReady && !isConnected
+            playButton.isEnabled = isConnected && !isPlaying
+            pauseButton.isEnabled = isConnected && isPlaying
+            stopButton.isEnabled = isConnected
+            disconnectButton.isEnabled = isConnected
+        }
     }
-    
-
 
     override fun onDestroy() {
         super.onDestroy()
         
         // 플레이어 해제
         xlabPlayer?.release()
-        xlabPlayer = null
-        
-        Log.d(TAG, "TestPlayerActivity 종료")
+        xlabPlayer = null       
+
     }
 } 

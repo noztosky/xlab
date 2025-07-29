@@ -17,9 +17,9 @@
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar"
         tools:targetApi="31">
 
-        <!-- 테스트 플레이어 액티비티 -->
+        <!-- 듀얼 플레이어 액티비티 (기본 실행) -->
         <activity
-            android:name="com.xlab.debug.TestPlayerActivity"
+            android:name="com.xlab.debug.DualPlayerActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:screenOrientation="unspecified">
@@ -29,7 +29,12 @@
             </intent-filter>
         </activity>
 
-
+        <!-- 테스트 플레이어 액티비티 -->
+        <activity
+            android:name="com.xlab.debug.TestPlayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:screenOrientation="unspecified" />
 
     </application>
 
