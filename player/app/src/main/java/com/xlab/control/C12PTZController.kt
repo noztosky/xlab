@@ -490,94 +490,47 @@ class C12PTZController {
     }
     
     /**
-     * 현재 PTZ 상태 조회
-     * @param callback 결과 콜백
+     * PTZ 명령 실행 전 연결 상태 확인 공통 함수
      */
-    fun getCurrentStatus(callback: PTZStatusCallback? = null) {
-        if (cameraHost == null) {
-            callback?.onError("카메라가 설정되지 않았습니다")
-            return
+    private fun checkConnectionForPTZ(callback: PTZMoveCallback?): Boolean {
+        return when {
+            cameraHost == null -> {
+                callback?.onError("카메라가 설정되지 않았습니다")
+                false
+            }
+            !isConnected -> {
+                callback?.onError("카메라가 연결되지 않았습니다")
+                false
+            }
+            else -> true
         }
-        
-        if (!isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "STATUS"
-                val success = sendUDPCommand(command)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        // UDP에서는 상태 응답 파싱이 필요하지만 현재는 로컬 값 반환
-                        callback?.onSuccess(currentPan, currentTilt, currentZoom)
-                    } else {
-                        callback?.onError("상태 조회 실패")
-                    }
+    }
+    
+    /**
+     * UDP 명령 실행과 결과 처리 공통 함수
+     */
+    private suspend fun executeUDPCommand(
+        command: String,
+        successMessage: String,
+        errorMessage: String,
+        callback: PTZMoveCallback?
+    ) {
+        try {
+            val success = sendUDPCommand(command)
+            withContext(Dispatchers.Main) {
+                if (success) {
+                    callback?.onSuccess(successMessage)
+                } else {
+                    callback?.onError(errorMessage)
                 }
-                
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    val errorMsg = "상태 조회 중 오류: ${e.message}"
-                    callback?.onError(errorMsg)
-                }
+            }
+        } catch (e: Exception) {
+            withContext(Dispatchers.Main) {
+                callback?.onError("$errorMessage: ${e.message}")
             }
         }
     }
-    
-    /**
-     * 현재 로컬에 저장된 PTZ 값 반환 (네트워크 요청 없음)
-     */
-    fun getLocalStatus(): Triple<Float, Float, Float> {
-        return Triple(currentPan, currentTilt, currentZoom)
-    }
-    
-    /**
-     * PTZ 이동 중인지 확인
-     */
-    fun isMoving(): Boolean {
-        // 실제 구현에서는 카메라 API로 이동 상태를 확인
-        // 여기서는 간단히 false 반환
-        return false
-    }
-    
-    /**
-     * PTZ 이동 정지
-     */
-    fun stopMovement(callback: PTZMoveCallback? = null) {
-        if (cameraHost == null) {
-            callback?.onError("카메라가 설정되지 않았습니다")
-            return
-        }
-        
-        if (!isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "STOP"
-                val success = sendUDPCommand(command)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("PTZ 이동 정지")
-                    } else {
-                        callback?.onError("PTZ 정지 실패")
-                    }
-                }
-                
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("PTZ 정지 중 오류: ${e.message}")
-                }
-            }
-        }
-    }
-    
+
     /**
      * PTZ 명령 실행 (내부 메서드)
      */
@@ -970,30 +923,12 @@ class C12PTZController {
      * 자동 추적 시작/정지
      */
     fun setAutoTracking(enabled: Boolean, callback: PTZMoveCallback? = null) {
-        if (cameraHost == null) {
-            callback?.onError("카메라가 설정되지 않았습니다")
-            return
-        }
+        if (!checkConnectionForPTZ(callback)) return
         
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val action = if (enabled) "start" else "stop"
-                val command = "TRACKING_$action"
-                val success = sendUDPCommand(command)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        val msg = if (enabled) "자동 추적 시작" else "자동 추적 정지"
-                        callback?.onSuccess(msg)
-                    } else {
-                        callback?.onError("자동 추적 설정 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("자동 추적 설정 중 오류: ${e.message}")
-                }
-            }
+            val action = if (enabled) "start" else "stop"
+            val msg = if (enabled) "자동 추적 시작" else "자동 추적 정지"
+            executeUDPCommand("TRACKING_$action", msg, "자동 추적 설정 실패", callback)
         }
     }
     
@@ -1001,30 +936,11 @@ class C12PTZController {
      * 이동 속도 설정 (1-100)
      */
     fun setPTZSpeed(speed: Int, callback: PTZMoveCallback? = null) {
+        if (!checkConnectionForPTZ(callback)) return
+        
         val clampedSpeed = speed.coerceIn(1, 100)
-        
-        if (cameraHost == null) {
-            callback?.onError("카메라가 설정되지 않았습니다")
-            return
-        }
-        
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "SPEED=$clampedSpeed"
-                val success = sendUDPCommand(command)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("PTZ 속도 설정: $clampedSpeed")
-                    } else {
-                        callback?.onError("PTZ 속도 설정 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("PTZ 속도 설정 중 오류: ${e.message}")
-                }
-            }
+            executeUDPCommand("SPEED=$clampedSpeed", "PTZ 속도 설정: $clampedSpeed", "PTZ 속도 설정 실패", callback)
         }
     }
     
@@ -1032,28 +948,10 @@ class C12PTZController {
      * 줌 포커스 자동 조절
      */
     fun autoFocus(callback: PTZMoveCallback? = null) {
-        if (cameraHost == null) {
-            callback?.onError("카메라가 설정되지 않았습니다")
-            return
-        }
+        if (!checkConnectionForPTZ(callback)) return
         
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "FOCUS_AUTO"
-                val success = sendUDPCommand(command)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("자동 포커스 완료")
-                    } else {
-                        callback?.onError("자동 포커스 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("자동 포커스 중 오류: ${e.message}")
-                }
-            }
+            executeUDPCommand("FOCUS_AUTO", "자동 포커스 완료", "자동 포커스 실패", callback)
         }
     }
     
@@ -1066,28 +964,10 @@ class C12PTZController {
             return
         }
         
-        if (cameraHost == null) {
-            callback?.onError("카메라가 설정되지 않았습니다")
-            return
-        }
+        if (!checkConnectionForPTZ(callback)) return
         
         CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "FOCUS_MANUAL=$direction"
-                val success = sendUDPCommand(command)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("수동 포커스 $direction 완료")
-                    } else {
-                        callback?.onError("수동 포커스 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("수동 포커스 중 오류: ${e.message}")
-                }
-            }
+            executeUDPCommand("FOCUS_MANUAL=$direction", "수동 포커스 $direction 완료", "수동 포커스 실패", callback)
         }
     }
     
@@ -1113,6 +993,78 @@ class C12PTZController {
         fun onError(error: String)
     }
     
+    // ===== 공통 D-class 명령 전송 헬퍼 =====
+    
+    /**
+     * D-class 명령 전송 공통 함수
+     */
+    private fun sendDClassCommand(
+        command: String,
+        successMessage: String,
+        errorMessage: String,
+        callback: RecordingCallback? = null
+    ) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        callback?.onSuccess(successMessage)
+                    } else {
+                        callback?.onError(errorMessage)
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("$errorMessage 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    /**
+     * D-class 상태 조회 명령 전송 공통 함수
+     */
+    private fun sendDClassStatusCommand(
+        command: String,
+        successMessage: String,
+        errorMessage: String,
+        callback: RecordingStatusCallback? = null
+    ) {
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val crc = calculateCrc(command)
+                val finalCommand = "$command${String.format("%02X", crc)}"
+                val success = sendUDPCommand(finalCommand)
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        callback?.onSuccess(false, successMessage)
+                    } else {
+                        callback?.onError(errorMessage)
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("$errorMessage 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+
     // ===== 1. 녹화 (录像) =====
     
     /**
@@ -1120,31 +1072,7 @@ class C12PTZController {
      * 제어위: w, 표식위: REC, 데이터위: 01
      */
     fun startRecording(callback: RecordingCallback? = null) {
-        if (cameraHost == null || !isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "#TPUD2wREC01"
-                val crc = calculateCrc(command)
-                val finalCommand = "$command${String.format("%02X", crc)}"
-                val success = sendUDPCommand(finalCommand)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("녹화 시작 명령 전송됨")
-                    } else {
-                        callback?.onError("녹화 시작 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("녹화 시작 중 오류: ${e.message}")
-                }
-            }
-        }
+        sendDClassCommand("#TPUD2wREC01", "녹화 시작 명령 전송됨", "녹화 시작 실패", callback)
     }
     
     /**
@@ -1152,31 +1080,7 @@ class C12PTZController {
      * 제어위: w, 표식위: REC, 데이터위: 00
      */
     fun stopRecording(callback: RecordingCallback? = null) {
-        if (cameraHost == null || !isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "#TPUD2wREC00"
-                val crc = calculateCrc(command)
-                val finalCommand = "$command${String.format("%02X", crc)}"
-                val success = sendUDPCommand(finalCommand)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("녹화 정지 명령 전송됨")
-                    } else {
-                        callback?.onError("녹화 정지 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("녹화 정지 중 오류: ${e.message}")
-                }
-            }
-        }
+        sendDClassCommand("#TPUD2wREC00", "녹화 정지 명령 전송됨", "녹화 정지 실패", callback)
     }
     
     /**
@@ -1184,31 +1088,7 @@ class C12PTZController {
      * 제어위: w, 표식위: REC, 데이터위: 0A
      */
     fun checkRecordingStatus(callback: RecordingStatusCallback? = null) {
-        if (cameraHost == null || !isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "#TPUD2wREC0A"
-                val crc = calculateCrc(command)
-                val finalCommand = "$command${String.format("%02X", crc)}"
-                val success = sendUDPCommand(finalCommand)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess(false, "녹화 상태 확인 명령 전송됨")
-                    } else {
-                        callback?.onError("녹화 상태 확인 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("녹화 상태 확인 중 오류: ${e.message}")
-                }
-            }
-        }
+        sendDClassStatusCommand("#TPUD2wREC0A", "녹화 상태 확인 명령 전송됨", "녹화 상태 확인 실패", callback)
     }
     
     /**
@@ -1216,35 +1096,9 @@ class C12PTZController {
      * 제어위: r, 표식위: REC, 데이터위: 00
      */
     fun getRecordingStatus(callback: RecordingStatusCallback? = null) {
-        if (cameraHost == null || !isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "#TPUD2rREC00"
-                val crc = calculateCrc(command)
-                val finalCommand = "$command${String.format("%02X", crc)}"
-                val success = sendUDPCommand(finalCommand)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess(false, "녹화 상태 조회 명령 전송됨")
-                    } else {
-                        callback?.onError("녹화 상태 조회 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("녹화 상태 조회 중 오류: ${e.message}")
-                }
-            }
-        }
+        sendDClassStatusCommand("#TPUD2rREC00", "녹화 상태 조회 명령 전송됨", "녹화 상태 조회 실패", callback)
     }
         
-
-    
     // ===== 2. 사진촬영 (拍照) =====
     
     /**
@@ -1252,31 +1106,7 @@ class C12PTZController {
      * 제어위: w, 표식위: CAP, 데이터위: 01
      */
     fun capturePhoto(callback: RecordingCallback? = null) {
-        if (cameraHost == null || !isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                val command = "#TPUD2wCAP01"
-                val crc = calculateCrc(command)
-                val finalCommand = "$command${String.format("%02X", crc)}"
-                val success = sendUDPCommand(finalCommand)
-                
-                withContext(Dispatchers.Main) {
-                    if (success) {
-                        callback?.onSuccess("사진 촬영 명령 전송됨")
-                    } else {
-                        callback?.onError("사진 촬영 실패")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    callback?.onError("사진 촬영 중 오류: ${e.message}")
-                }
-            }
-        }
+        sendDClassCommand("#TPUD2wCAP01", "사진 촬영 명령 전송됨", "사진 촬영 실패", callback)
     }
     
     // ===== 3. 녹화 분해능 설정 (录像分辨率) =====
@@ -1287,11 +1117,6 @@ class C12PTZController {
      * @param resolution 0: 720p, 1: 1080p, 2: 2k, 3: 4k
      */
     fun setVideoResolution(resolution: Int, callback: ResolutionCallback? = null) {
-        if (cameraHost == null || !isConnected) {
-            callback?.onError("카메라가 연결되지 않았습니다")
-            return
-        }
-        
         val resolutionCode = when (resolution) {
             0 -> "00"  // 720p
             1 -> "01"  // 1080p
@@ -1301,6 +1126,11 @@ class C12PTZController {
                 callback?.onError("유효하지 않은 해상도입니다 (0: 720p, 1: 1080p, 2: 2k, 3: 4k)")
                 return
             }
+        }
+        
+        if (cameraHost == null || !isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
         }
         
         CoroutineScope(Dispatchers.IO).launch {
@@ -1314,7 +1144,7 @@ class C12PTZController {
                     if (success) {
                         val resolutionName = when (resolution) {
                             0 -> "720p"
-                            1 -> "1080p"
+                            1 -> "1080p" 
                             2 -> "2K"
                             3 -> "4K"
                             else -> "Unknown"
@@ -1414,6 +1244,63 @@ class C12PTZController {
         }
     }
 
+    /**
+     * PTZ 이동 정지
+     */
+    fun stopMovement(callback: PTZMoveCallback? = null) {
+        if (!checkConnectionForPTZ(callback)) return
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            executeUDPCommand("STOP", "PTZ 이동 정지", "PTZ 정지 실패", callback)
+        }
+    }
+    
+    /**
+     * 현재 PTZ 상태 조회
+     * @param callback 결과 콜백
+     */
+    fun getCurrentStatus(callback: PTZStatusCallback? = null) {
+        if (cameraHost == null) {
+            callback?.onError("카메라가 설정되지 않았습니다")
+            return
+        }
+        
+        if (!isConnected) {
+            callback?.onError("카메라가 연결되지 않았습니다")
+            return
+        }
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val success = sendUDPCommand("STATUS")
+                
+                withContext(Dispatchers.Main) {
+                    if (success) {
+                        // UDP에서는 상태 응답 파싱이 필요하지만 현재는 로컬 값 반환
+                        callback?.onSuccess(currentPan, currentTilt, currentZoom)
+                    } else {
+                        callback?.onError("상태 조회 실패")
+                    }
+                }
+                
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    callback?.onError("상태 조회 중 오류: ${e.message}")
+                }
+            }
+        }
+    }
+    
+    /**
+     * 현재 로컬에 저장된 PTZ 값 반환 (네트워크 요청 없음)
+     */
+    fun getLocalStatus(): Triple<Float, Float, Float> = Triple(currentPan, currentTilt, currentZoom)
+    
+    /**
+     * PTZ 이동 중인지 확인
+     */
+    fun isMoving(): Boolean = false  // 실제 구현에서는 카메라 API로 이동 상태를 확인
+    
     /**
      * 리소스 정리
      */
