@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "com.xlab.Player"
-    compileSdk = 34
+    compileSdk = 33
 
     defaultConfig {
         applicationId = "com.xlab.Player"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 33
         versionCode = 13
         versionName = "4.2"
 
@@ -37,6 +37,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            isDebuggable = true
+            applicationIdSuffix = ".debug"
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -46,11 +50,11 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = "11"
     }
 }
 
@@ -58,6 +62,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
+    // Lifecycle components for automatic lifecycle management
+    implementation("androidx.lifecycle:lifecycle-process:2.6.1")
+    implementation("androidx.lifecycle:lifecycle-common:2.6.1")
     // ExoPlayer for H.265 support (최신 호환 버전)
     implementation("com.google.android.exoplayer:exoplayer:2.19.1")
     implementation("com.google.android.exoplayer:exoplayer-core:2.19.1")
@@ -65,8 +72,8 @@ dependencies {
     implementation("com.google.android.exoplayer:exoplayer-rtsp:2.19.1")
     // MediaCodec support
     implementation("androidx.media:media:1.6.0")
-    // LibVLC Android for alternative RTSP playback
-    implementation("org.videolan.android:libvlc-all:3.6.0-eap5")
+    // LibVLC Android for alternative RTSP playback (안정 버전)
+    implementation("org.videolan.android:libvlc-all:3.4.4")
     // Kotlin Coroutines for PTZ control
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     testImplementation(libs.junit)

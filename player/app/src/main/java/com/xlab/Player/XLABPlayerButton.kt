@@ -1,0 +1,227 @@
+package com.xlab.Player
+
+import android.content.Context
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.util.TypedValue
+import android.view.Gravity
+import android.widget.Button
+import android.widget.LinearLayout
+
+/**
+ * XLABPlayer용 프로그래매틱 버튼 클래스
+ * 뷰 없이 코드로만 생성하여 재사용 가능
+ */
+class XLABPlayerButton(
+    private val context: Context,
+    private val text: String,
+    private val buttonType: ButtonType = ButtonType.PRIMARY
+) {
+    
+    enum class ButtonType {
+        PRIMARY,    // 기본 버튼 (파란색)
+        SUCCESS,    // 성공 버튼 (초록색)
+        WARNING,    // 경고 버튼 (주황색)
+        DANGER,     // 위험 버튼 (빨간색)
+        SECONDARY   // 보조 버튼 (회색)
+    }
+    
+    // 실제 버튼 뷰
+    val buttonView: Button
+    
+    // 버튼 상태
+    var isEnabled: Boolean = true
+        set(value) {
+            field = value
+            buttonView.isEnabled = value
+            updateButtonAppearance()
+        }
+    
+    // 클릭 리스너
+    private var clickListener: (() -> Unit)? = null
+    
+    init {
+        buttonView = createButton()
+        setupButton()
+    }
+    
+    /**
+     * 버튼 생성
+     */
+    private fun createButton(): Button {
+        return Button(context).apply {
+            text = this@XLABPlayerButton.text
+            
+            // 레이아웃 파라미터 설정
+            val params = LinearLayout.LayoutParams(
+                dpToPx(120), // 기본 너비 120dp
+                dpToPx(40)   // 기본 높이 40dp
+            ).apply {
+                setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
+            }
+            layoutParams = params
+            
+            // 텍스트 설정
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            
+            // 클릭 리스너 설정
+            setOnClickListener {
+                clickListener?.invoke()
+            }
+        }
+    }
+    
+    /**
+     * 버튼 스타일 설정
+     */
+    private fun setupButton() {
+        updateButtonAppearance()
+    }
+    
+    /**
+     * 버튼 외관 업데이트
+     */
+    private fun updateButtonAppearance() {
+        val (backgroundColor, pressedColor) = getButtonColors()
+        
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dpToPx(8).toFloat()
+            setColor(if (isEnabled) backgroundColor else Color.GRAY)
+        }
+        
+        // 눌림 효과를 위한 StateListDrawable
+        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dpToPx(8).toFloat()
+                setColor(if (isEnabled) pressedColor else Color.GRAY)
+            })
+            addState(intArrayOf(), drawable)
+        }
+        
+        buttonView.background = stateDrawable
+        buttonView.alpha = if (isEnabled) 1.0f else 0.6f
+    }
+    
+    /**
+     * 버튼 타입에 따른 색상 반환
+     */
+    private fun getButtonColors(): Pair<Int, Int> {
+        return when (buttonType) {
+            ButtonType.PRIMARY -> Pair(Color.parseColor("#2196F3"), Color.parseColor("#1976D2"))
+            ButtonType.SUCCESS -> Pair(Color.parseColor("#4CAF50"), Color.parseColor("#388E3C"))
+            ButtonType.WARNING -> Pair(Color.parseColor("#FF9800"), Color.parseColor("#F57C00"))
+            ButtonType.DANGER -> Pair(Color.parseColor("#F44336"), Color.parseColor("#D32F2F"))
+            ButtonType.SECONDARY -> Pair(Color.parseColor("#9E9E9E"), Color.parseColor("#757575"))
+        }
+    }
+    
+    /**
+     * 클릭 리스너 설정
+     */
+    fun setOnClickListener(listener: () -> Unit) {
+        this.clickListener = listener
+    }
+    
+    /**
+     * 버튼 텍스트 변경
+     */
+    fun setText(newText: String) {
+        buttonView.text = newText
+    }
+    
+    /**
+     * 버튼을 아이콘 형태로 설정 (사각형)
+     */
+    fun setAsIconButton(icon: String) {
+        buttonView.text = icon
+        buttonView.textSize = 20f
+        buttonView.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
+        
+        // 투명 배경 설정
+        buttonView.background = null
+        buttonView.setTextColor(Color.WHITE)
+        
+        // 정사각형으로 만들기
+        setSize(40, 40)
+    }
+    
+    /**
+     * 투명 배경의 전체화면 버튼 스타일
+     */
+    fun setAsTransparentIconButton(icon: String) {
+        buttonView.text = icon
+        buttonView.textSize = 24f
+        buttonView.setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6))
+        
+        // 완전 투명 배경
+        buttonView.background = null
+        buttonView.setTextColor(Color.WHITE)
+        
+        // 그림자 효과 (가독성을 위해)
+        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#80000000"))
+        
+        // 정사각형으로 만들기
+        setSize(36, 36)
+    }
+    
+    /**
+     * 버튼 크기 변경
+     */
+    fun setSize(widthDp: Int, heightDp: Int) {
+        val params = LinearLayout.LayoutParams(dpToPx(widthDp), dpToPx(heightDp))
+        params.setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
+        buttonView.layoutParams = params
+    }
+    
+    /**
+     * 버튼 마진 설정
+     */
+    fun setMargin(leftDp: Int, topDp: Int, rightDp: Int, bottomDp: Int) {
+        val params = buttonView.layoutParams as LinearLayout.LayoutParams
+        params.setMargins(dpToPx(leftDp), dpToPx(topDp), dpToPx(rightDp), dpToPx(bottomDp))
+        buttonView.layoutParams = params
+    }
+    
+    /**
+     * dp를 px로 변환
+     */
+    private fun dpToPx(dp: Int): Int {
+        return TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp.toFloat(),
+            context.resources.displayMetrics
+        ).toInt()
+    }
+    
+    companion object {
+        /**
+         * 빠른 버튼 생성 팩토리 메서드
+         */
+        fun create(
+            context: Context,
+            text: String,
+            type: ButtonType = ButtonType.PRIMARY,
+            clickListener: (() -> Unit)? = null
+        ): XLABPlayerButton {
+            return XLABPlayerButton(context, text, type).apply {
+                clickListener?.let { setOnClickListener(it) }
+            }
+        }
+        
+        /**
+         * 여러 버튼을 한 번에 생성
+         */
+        fun createButtons(
+            context: Context,
+            vararg buttonConfigs: Triple<String, ButtonType, (() -> Unit)?>
+        ): List<XLABPlayerButton> {
+            return buttonConfigs.map { (text, type, listener) ->
+                create(context, text, type, listener)
+            }
+        }
+    }
+} 

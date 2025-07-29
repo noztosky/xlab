@@ -1,876 +1,730 @@
 package com.xlab.Player
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.ViewGroup
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleObserver
+import androidx.lifecycle.OnLifecycleEvent
+import androidx.lifecycle.ProcessLifecycleOwner
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlinx.coroutines.*
-import java.io.BufferedReader
-import java.io.InputStreamReader
-// import org.videolan.libvlc.util.VLCVideoLayout  // VLCVideoLayout이 없는 경우 주석 처리
+import org.videolan.libvlc.util.VLCVideoLayout
 
 /**
- * LibVLC Android를 사용한 H.265 비디오 플레이어
- * RTSP 스트림 재생에 특화되어 있으며 ExoPlayer 대안으로 사용
+ * XLAB RTSP 플레이어 (VLCLib 기반)
+ * AAR 배포용 플레이어 클래스
+ * 자동 라이프사이클 관리 지원
  */
-class XlabPlayer(private val context: Context) {
-    
+class XLABPlayer(private val context: Context) : LifecycleObserver {
     companion object {
-        private const val TAG = "XlabPlayer"
+        private const val TAG = "XLABPlayer"
+        private const val DEFAULT_RTSP_URL = "rtsp://192.168.144.108:554/stream=1"
     }
-    
+
     private var libVLC: LibVLC? = null
     private var mediaPlayer: MediaPlayer? = null
-    private var surfaceView: SurfaceView? = null
-    // private var vlcVideoLayout: VLCVideoLayout? = null  // VLCVideoLayout 사용 안함
+    private var media: Media? = null
+    private var videoLayout: VLCVideoLayout? = null
+    private var parentViewGroup: ViewGroup? = null
+
+    private var isInitialized = false
+    private var isPlaying = false
+    private var isConnected = false
+    private var currentUrl = ""
     
-    // 버퍼링 설정 (0.1초 단위, 기본값 2.0초)
-    private var networkCachingSeconds: Float = 2.0f
-    private var liveCachingSeconds: Float = 0.3f
-    
-    // 현재 재생 중인 URL 저장
-    private var currentPlayingUrl: String? = null
-    
-    // 카메라 설정 관리
-    private val cameraSettingsManager = CameraSettingsManager()
-    private var currentCameraController: CameraController? = null
-    private var selectedCameraInfo: CameraInfo? = null
-    
-    // 콜백 인터페이스들
-    private var playbackListener: PlaybackListener? = null
-    private var errorListener: ErrorListener? = null
-    
-    interface PlaybackListener {
+    // 전체화면 관련
+    private var isFullscreen = false
+    private var originalLayoutParams: ViewGroup.LayoutParams? = null
+    private var fullscreenButton: XLABPlayerButton? = null
+
+    interface PlayerCallback {
         fun onPlayerReady()
-        fun onBuffering()
-        fun onPlaying()
-        fun onPaused()
-        fun onEnded()
+        fun onPlayerConnected()
+        fun onPlayerDisconnected()
+        fun onPlayerPlaying()
+        fun onPlayerPaused()
+        fun onPlayerError(error: String)
         fun onVideoSizeChanged(width: Int, height: Int)
     }
+    private var playerCallback: PlayerCallback? = null
     
-    interface ErrorListener {
-        fun onError(error: String, exception: Exception?)
-    }
+    // 자동 라이프사이클 관리
+    private var isLifecycleRegistered = false
     
-    /**
-     * SurfaceView를 사용한 LibVLC 초기화
-     */
-    fun initializeWithSurfaceView(surfaceView: SurfaceView): XlabPlayer {
-        this.surfaceView = surfaceView
-        setupLibVLC()
-        return this
-    }
+
     
-    /**
-     * 네트워크 캐싱 시간 설정 (0.1초 단위)
-     * @param seconds 캐싱 시간 (0.1 ~ 30.0초)
-     */
-    fun setNetworkCaching(seconds: Float): XlabPlayer {
-        networkCachingSeconds = seconds.coerceIn(0.1f, 30.0f)
-        Log.d(TAG, "네트워크 캐싱 설정: ${networkCachingSeconds}초")
-        return this
-    }
+    // 버튼 관리
+    private var buttonContainer: LinearLayout? = null
+    private val playerButtons = mutableListOf<XLABPlayerButton>()
     
-    /**
-     * 라이브 스트림 캐싱 시간 설정 (0.1초 단위)
-     * @param seconds 캐싱 시간 (0.1 ~ 5.0초)
-     */
-    fun setLiveCaching(seconds: Float): XlabPlayer {
-        liveCachingSeconds = seconds.coerceIn(0.1f, 5.0f)
-        Log.d(TAG, "라이브 캐싱 설정: ${liveCachingSeconds}초")
-        return this
-    }
-    
-    /**
-     * 캐싱 설정을 한 번에 설정
-     * @param networkSeconds 네트워크 캐싱 (0.1 ~ 30.0초)
-     * @param liveSeconds 라이브 캐싱 (0.1 ~ 5.0초)
-     */
-    fun setCachingSettings(networkSeconds: Float, liveSeconds: Float): XlabPlayer {
-        setNetworkCaching(networkSeconds)
-        setLiveCaching(liveSeconds)
-        return this
-    }
-    
-    /**
-     * 현재 캐싱 설정 반환
-     */
-    fun getCachingSettings(): Pair<Float, Float> {
-        return Pair(networkCachingSeconds, liveCachingSeconds)
-    }
-    
-    /**
-     * 현재 재생 중인 URL 반환
-     */
-    fun getCurrentPlayingUrl(): String? {
-        return currentPlayingUrl
-    }
-    
-    /**
-     * 버퍼시간 즉시 적용 (재생 중에도 적용 가능)
-     */
-    fun applyBufferTime(networkSeconds: Float, liveSeconds: Float) {
+    init {
+        // 앱 라이프사이클 감지 시작
         try {
-            val clampedNetwork = networkSeconds.coerceIn(0.1f, 30.0f)
-            val clampedLive = liveSeconds.coerceIn(0.1f, 5.0f)
-            
-            networkCachingSeconds = clampedNetwork
-            liveCachingSeconds = clampedLive
-            
-            Log.d(TAG, "버퍼시간 즉시 적용: 네트워크=${clampedNetwork}초, 라이브=${clampedLive}초")
-            
-            // 현재 재생 중인 URL이 있고, 실제로 재생 중인 경우에만 다시 재생
-            currentPlayingUrl?.let { url ->
-                if (mediaPlayer?.isPlaying == true) {
-                    Log.d(TAG, "새로운 버퍼 설정으로 LibVLC 재초기화 및 스트림 다시 재생: $url")
-                    
-                    // 기존 미디어 정리
-                    mediaPlayer?.stop()
-                    
-                    // LibVLC 완전 재초기화
-                    reinitializeLibVLC()
-                    
-                    // 잠시 대기 후 다시 재생
-                    kotlinx.coroutines.GlobalScope.launch {
-                        kotlinx.coroutines.delay(1000) // 1초 대기 (재초기화 시간 고려)
-                        playRtspStreamCompatible(url)
-                    }
-                } else {
-                    Log.d(TAG, "재생 중이 아니므로 버퍼시간만 업데이트")
-                }
-            }
-            
+            ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+            isLifecycleRegistered = true
+    // 라이프사이클 감지 시작
         } catch (e: Exception) {
-            Log.e(TAG, "버퍼시간 적용 실패", e)
+            // 라이프사이클 등록 실패 (무시)
         }
-    }
-    
-    /**
-     * LibVLC 완전 재초기화
-     */
-    private fun reinitializeLibVLC() {
-        try {
-            Log.d(TAG, "LibVLC 재초기화 시작")
-            
-            // 기존 리소스 정리
-            mediaPlayer?.release()
-            libVLC?.release()
-            
-            // 새로운 LibVLC 인스턴스 생성
-            setupLibVLC()
-            
-            Log.d(TAG, "LibVLC 재초기화 완료")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "LibVLC 재초기화 실패", e)
-            errorListener?.onError("LibVLC 재초기화 실패: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * 빠른 연결 모드 (최소 지연시간)
-     */
-    fun setFastMode(): XlabPlayer {
-        return setCachingSettings(0.3f, 0.1f)
-    }
-    
-    /**
-     * 안정적 연결 모드 (기본값)
-     */
-    fun setStableMode(): XlabPlayer {
-        return setCachingSettings(2.0f, 0.3f)
-    }
-    
-    /**
-     * 고품질 연결 모드 (높은 안정성)
-     */
-    fun setHighQualityMode(): XlabPlayer {
-        return setCachingSettings(5.0f, 0.5f)
-    }
-    
-    /**
-     * VLCVideoLayout을 사용한 LibVLC 초기화 (현재 사용 안함)
-     */
-    // fun initializeWithVLCVideoLayout(vlcVideoLayout: VLCVideoLayout): LibVLCVideoPlayer {
-    //     this.vlcVideoLayout = vlcVideoLayout
-    //     setupLibVLCWithVideoLayout()
-    //     return this
-    // }
-    
-    /**
-     * LibVLC 설정 - SurfaceView 사용
-     */
-    private fun setupLibVLC() {
-        try {
-            // LibVLC 옵션 설정 (RTSP 스트림 최적화)
-            val networkCachingMs = (networkCachingSeconds * 1000).toInt()
-            val liveCachingMs = (liveCachingSeconds * 1000).toInt()
-            
-            val options = arrayListOf<String>().apply {
-                // 네트워크 옵션 (사용자 설정값 사용)
-                add("--network-caching=$networkCachingMs")
-                add("--rtsp-tcp")
-                add("--no-drop-late-frames")
-                add("--no-skip-frames")
-                
-                // 하드웨어 디코딩 옵션
-                add("--codec=mediacodec_ndk,mediacodec_jni,all")
-                add("--video-filter=")
-                
-                // RTSP 관련 옵션
-                add("--rtsp-frame-buffer-size=500000")
-                add("--live-caching=$liveCachingMs")
-                
-                // 로깅 최소화
-                add("--verbose=0")
-            }
-            
-            libVLC = LibVLC(context, options)
-            mediaPlayer = MediaPlayer(libVLC!!)
-            
-            // SurfaceView에 연결
-            surfaceView?.holder?.addCallback(object : SurfaceHolder.Callback {
-                override fun surfaceCreated(holder: SurfaceHolder) {
-                    Log.d(TAG, "Surface 생성됨")
-                    attachVideoSurface(holder)
-                }
-                
-                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                    Log.d(TAG, "Surface 변경됨: ${width}x${height}")
-                    mediaPlayer?.getVLCVout()?.setWindowSize(width, height)
-                }
-                
-                override fun surfaceDestroyed(holder: SurfaceHolder) {
-                    Log.d(TAG, "Surface 소멸됨")
-                    detachVideoSurface()
-                }
-            })
-            
-            // 이벤트 리스너 설정
-            setupEventListeners()
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "LibVLC 초기화 실패", e)
-            errorListener?.onError("LibVLC 초기화 실패: ${e.message}", e)
-        }
-    }
-    
-    // VLCVideoLayout 사용 안함으로 주석 처리
-    // private fun setupLibVLCWithVideoLayout() { ... }
-    
-    /**
-     * 비디오 Surface 연결
-     */
-    private fun attachVideoSurface(holder: SurfaceHolder) {
-        try {
-            val vlcVout = mediaPlayer?.getVLCVout()
-            vlcVout?.setVideoSurface(holder.surface, holder)
-            vlcVout?.attachViews()
-            Log.d(TAG, "비디오 Surface 연결 완료")
-        } catch (e: Exception) {
-            Log.e(TAG, "비디오 Surface 연결 실패", e)
-        }
-    }
-    
-    /**
-     * 비디오 Surface 해제
-     */
-    private fun detachVideoSurface() {
-        try {
-            mediaPlayer?.getVLCVout()?.detachViews()
-            Log.d(TAG, "비디오 Surface 해제 완료")
-        } catch (e: Exception) {
-            Log.e(TAG, "비디오 Surface 해제 실패", e)
-        }
-    }
-    
-    /**
-     * 이벤트 리스너 설정
-     */
-    private fun setupEventListeners() {
-        mediaPlayer?.setEventListener { event ->
-            Log.d(TAG, "LibVLC 이벤트: ${event.type}")
-            
-            when (event.type) {
-                MediaPlayer.Event.Opening -> {
-                    Log.d(TAG, "스트림 열기 시작")
-                    playbackListener?.onBuffering()
-                }
-                
-                MediaPlayer.Event.Buffering -> {
-                    val percent = event.buffering
-                    // 버퍼링 로그 스팸 방지 - 10% 단위로만 로깅
-                    if (percent.toInt() % 10 == 0 || percent == 100f) {
-                        Log.d(TAG, "버퍼링: ${percent}%")
-                    }
-                    if (percent < 100f) {
-                        // 버퍼링 상태 업데이트도 10% 단위로만
-                        if (percent.toInt() % 20 == 0) {
-                            playbackListener?.onBuffering()
-                        }
-                    } else {
-                        Log.d(TAG, "버퍼링 완료 (100%)")
-                    }
-                }
-                
-                MediaPlayer.Event.Playing -> {
-                    Log.d(TAG, "재생 시작")
-                    playbackListener?.onPlayerReady()
-                    playbackListener?.onPlaying()
-                }
-                
-                MediaPlayer.Event.Paused -> {
-                    Log.d(TAG, "재생 일시정지")
-                    playbackListener?.onPaused()
-                }
-                
-                MediaPlayer.Event.Stopped -> {
-                    Log.d(TAG, "재생 정지")
-                    playbackListener?.onEnded()
-                }
-                
-                MediaPlayer.Event.EndReached -> {
-                    Log.d(TAG, "재생 완료")
-                    playbackListener?.onEnded()
-                }
-                
-                MediaPlayer.Event.EncounteredError -> {
-                    Log.e(TAG, "LibVLC 재생 오류 발생")
-                    errorListener?.onError("LibVLC 재생 오류", null)
-                }
-                
-                MediaPlayer.Event.Vout -> {
-                    val voutCount = event.voutCount
-                    Log.d(TAG, "비디오 출력 초기화됨: $voutCount")
-                    if (voutCount > 0) {
-                        Log.d(TAG, "비디오 출력 활성화됨 - 영상 표시 시작")
-                        // 비디오 크기 정보 가져오기
-                        val videoTrack = mediaPlayer?.currentVideoTrack
-                        videoTrack?.let { track ->
-                            Log.d(TAG, "비디오 트랙 정보: ${track.width}x${track.height}")
-                            playbackListener?.onVideoSizeChanged(track.width, track.height)
-                        } ?: Log.w(TAG, "비디오 트랙 정보를 가져올 수 없음")
-                    } else {
-                        Log.w(TAG, "비디오 출력이 비활성화됨")
-                    }
-                }
-                
-                MediaPlayer.Event.ESAdded -> {
-                    Log.d(TAG, "Elementary Stream 추가됨")
-                }
-                
-                else -> {
-                    Log.v(TAG, "기타 이벤트: ${event.type}")
-                }
-            }
-        }
-    }
-    
-    /**
-     * RTSP 스트림 재생 - 기본 모드
-     */
-    fun playRtspStream(rtspUrl: String) {
-        try {
-            Log.d(TAG, "=== LibVLC RTSP 재생 시작 ===")
-            Log.d(TAG, "URL: $rtspUrl")
-            
-            val media = Media(libVLC, Uri.parse(rtspUrl))
-            
-            // RTSP 스트림 전용 옵션 추가 (사용자 설정값 사용)
-            val networkCachingMs = (networkCachingSeconds * 1000).toInt()
-            media.addOption(":network-caching=$networkCachingMs")  // 사용자 설정 네트워크 캐싱
-            media.addOption(":rtsp-tcp")  // TCP 모드 강제
-            media.addOption(":rtsp-timeout=15")  // 15초 타임아웃
-            media.addOption(":no-audio")  // 비디오만 재생
-            
-            mediaPlayer?.media = media
-            mediaPlayer?.play()
-            
-            Log.d(TAG, "LibVLC RTSP 재생 시작됨")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "RTSP 재생 실패", e)
-            errorListener?.onError("RTSP 재생 실패: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * RTSP 스트림 재생 - UDP 모드
-     */
-    fun playRtspStreamUDP(rtspUrl: String) {
-        try {
-            Log.d(TAG, "=== LibVLC RTSP 재생 시작 (UDP 모드) ===")
-            Log.d(TAG, "URL: $rtspUrl")
-            
-            val media = Media(libVLC, Uri.parse(rtspUrl))
-            
-            // UDP 모드 옵션 (사용자 설정값 사용)
-            val networkCachingMs = (networkCachingSeconds * 1000).toInt()
-            media.addOption(":network-caching=$networkCachingMs")  // 사용자 설정 캐싱
-            media.addOption(":rtsp-tcp=0")  // UDP 모드
-            media.addOption(":rtsp-timeout=10")  // 10초 타임아웃
-            media.addOption(":no-audio")
-            
-            mediaPlayer?.media = media
-            mediaPlayer?.play()
-            
-            Log.d(TAG, "LibVLC RTSP 재생 시작됨 (UDP)")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "RTSP UDP 재생 실패", e)
-            errorListener?.onError("RTSP UDP 재생 실패: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * RTSP 스트림 재생 - 호환성 모드 (오류 406 해결용)
-     */
-    fun playRtspStreamCompatible(rtspUrl: String) {
-        try {
-            Log.d(TAG, "=== LibVLC RTSP 재생 시작 (호환성 모드) ===")
-            Log.d(TAG, "URL: $rtspUrl")
-            
-            // 현재 재생 URL 저장
-            currentPlayingUrl = rtspUrl
-            
-            val media = Media(libVLC, Uri.parse(rtspUrl))
-            
-            // 호환성 최대화 옵션 (사용자 설정값 사용)
-            val networkCachingMs = (networkCachingSeconds * 1000).toInt()
-            val liveCachingMs = (liveCachingSeconds * 1000).toInt()
-            media.addOption(":network-caching=$networkCachingMs")  // 사용자 설정 캐싱
-            media.addOption(":rtsp-tcp")  // TCP 모드
-            media.addOption(":rtsp-timeout=30")  // 30초 타임아웃 (충분한 대기)
-            media.addOption(":rtsp-frame-buffer-size=000000")  // 1MB 프레임 버퍼
-            media.addOption(":no-audio")
-            media.addOption(":no-spu")
-            media.addOption(":live-caching=$liveCachingMs")  // 사용자 설정 라이브 캐싱
-            
-            // H.265 디코딩 우선순위
-            media.addOption(":codec=mediacodec_ndk,mediacodec_jni,avcodec")
-            
-            mediaPlayer?.media = media
-            
-            Log.d(TAG, "LibVLC MediaPlayer에 미디어 설정 완료")
-            Log.d(TAG, "LibVLC 재생 시작...")
-            
-            mediaPlayer?.play()
-            
-            Log.d(TAG, "LibVLC RTSP 재생 시작됨 (호환성 모드)")
-            Log.d(TAG, "LibVLC 상태: Playing=${mediaPlayer?.isPlaying}, Length=${mediaPlayer?.length}")
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "RTSP 호환성 모드 재생 실패", e)
-            errorListener?.onError("RTSP 호환성 모드 재생 실패: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * 미디어 파일 재생
-     */
-    fun playMediaFile(filePath: String) {
-        try {
-            Log.d(TAG, "미디어 파일 재생 시작: $filePath")
-            
-            val media = Media(libVLC, Uri.parse(filePath))
-            mediaPlayer?.media = media
-            mediaPlayer?.play()
-            
-        } catch (e: Exception) {
-            Log.e(TAG, "파일 재생 실패", e)
-            errorListener?.onError("미디어 파일 재생 실패: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * 재생 시작/재개
-     */
-    fun play() {
-        mediaPlayer?.play()
-        Log.d(TAG, "재생 시작/재개")
-    }
-    
-    /**
-     * 재생 일시정지
-     */
-    fun pause() {
-        mediaPlayer?.pause()
-        Log.d(TAG, "재생 일시정지")
-    }
-    
-    /**
-     * 재생 정지
-     */
-    fun stop() {
-        mediaPlayer?.stop()
-        Log.d(TAG, "재생 정지")
-    }
-    
-    /**
-     * 재생 위치 설정 (밀리초)
-     */
-    fun seekTo(positionMs: Long) {
-        mediaPlayer?.time = positionMs
-    }
-    
-    /**
-     * 현재 재생 위치 반환 (밀리초)
-     */
-    fun getCurrentPosition(): Long {
-        return mediaPlayer?.time ?: 0L
-    }
-    
-    /**
-     * 전체 재생 시간 반환 (밀리초)
-     */
-    fun getDuration(): Long {
-        return mediaPlayer?.length ?: 0L
-    }
-    
-    /**
-     * 재생 중인지 확인
-     */
-    fun isPlaying(): Boolean {
-        return mediaPlayer?.isPlaying ?: false
-    }
-    
-    /**
-     * 볼륨 설정 (0-100)
-     */
-    fun setVolume(volume: Int) {
-        mediaPlayer?.volume = volume.coerceIn(0, 100)
-    }
-    
-    /**
-     * 현재 볼륨 반환 (0-100)
-     */
-    fun getVolume(): Int {
-        return mediaPlayer?.volume ?: 0
-    }
-    
-    /**
-     * 재생 속도 설정 (0.25 ~ 4.0)
-     */
-    fun setPlaybackSpeed(speed: Float) {
-        mediaPlayer?.rate = speed.coerceIn(0.25f, 4.0f)
-    }
-    
-    /**
-     * 비디오 정보 반환
-     */
-    fun getVideoInfo(): String {
-        val videoTrack = mediaPlayer?.currentVideoTrack
-        return if (videoTrack != null) {
-            "해상도: ${videoTrack.width}x${videoTrack.height}\n" +
-            "프레임률: ${videoTrack.frameRateNum}/${videoTrack.frameRateDen}\n" +
-            "코덱: ${videoTrack.codec}"
-        } else {
-            "비디오 정보 없음"
-        }
-    }
-    
-    /**
-     * 콜백 리스너 설정
-     */
-    fun setPlaybackListener(listener: PlaybackListener): XlabPlayer {
-        this.playbackListener = listener
-        return this
-    }
-    
-    fun setErrorListener(listener: ErrorListener): XlabPlayer {
-        this.errorListener = listener
-        return this
-    }
-    
-    /**
-     * 사용 가능한 카메라 목록 반환
-     */
-    fun getAvailableCameras(): List<CameraInfo> {
-        return cameraSettingsManager.getAvailableCameras()
-    }
-    
-    /**
-     * 특정 기능을 지원하는 카메라 목록 반환
-     */
-    fun getCamerasByCapability(capability: CameraCapability): List<CameraInfo> {
-        return cameraSettingsManager.getCamerasByCapability(capability)
-    }
-    
-    /**
-     * 카메라 ID로 카메라 설정
-     * @param cameraId 카메라 ID
-     * @param customSettings 사용자 정의 설정 (null이면 기본 설정 사용)
-     */
-    fun setupCameraById(cameraId: String, customSettings: CameraConnectionSettings? = null): XlabPlayer {
-        val cameraInfo = cameraSettingsManager.getCameraById(cameraId)
-        if (cameraInfo == null) {
-            Log.e(TAG, "카메라 ID를 찾을 수 없습니다: $cameraId")
-            return this
-        }
-        
-        return setupCamera(cameraInfo, customSettings)
-    }
-    
-    /**
-     * 카메라 정보로 카메라 설정
-     * @param cameraInfo 카메라 정보
-     * @param customSettings 사용자 정의 설정 (null이면 기본 설정 사용)
-     */
-    fun setupCamera(cameraInfo: CameraInfo, customSettings: CameraConnectionSettings? = null): XlabPlayer {
-        val settings = customSettings ?: cameraInfo.defaultSettings
-        
-        // 카메라 타입에 따른 컨트롤러 생성
-        currentCameraController = when (cameraInfo.id) {
-            "c12_ptz" -> C12CameraController()
-            // 여기에 다른 카메라 컨트롤러들을 추가할 수 있습니다
-            // "hikvision_dome" -> HikvisionCameraController()
-            // "axis_ptz" -> AxisCameraController()
-            else -> {
-                Log.e(TAG, "지원되지 않는 카메라 타입: ${cameraInfo.id}")
-                return this
-            }
-        }
-        
-        val success = currentCameraController?.setupCamera(settings) ?: false
-        if (success) {
-            selectedCameraInfo = cameraInfo
-            Log.d(TAG, "카메라 설정 완료: ${cameraInfo.name} (${settings.baseUrl})")
-        } else {
-            Log.e(TAG, "카메라 설정 실패: ${cameraInfo.name}")
-            currentCameraController = null
-        }
-        
-        return this
-    }
-    
-    /**
-     * C12 카메라 빠른 설정 (하위 호환성)
-     * @param baseUrl 카메라의 기본 URL (예: "http://192.168.144.108")
-     * @param username 카메라 사용자명
-     * @param password 카메라 비밀번호
-     */
-    fun setupC12Camera(baseUrl: String, username: String = "admin", password: String = ""): XlabPlayer {
-        val customSettings = CameraConnectionSettings(
-            baseUrl = baseUrl.trimEnd('/'),
-            username = username,
-            password = password
-        )
-        return setupCameraById("c12_ptz", customSettings)
-    }
-    
-    /**
-     * 현재 선택된 카메라 정보 반환
-     */
-    fun getCurrentCameraInfo(): CameraInfo? {
-        return selectedCameraInfo
-    }
-    
-    /**
-     * 현재 카메라가 특정 기능을 지원하는지 확인
-     */
-    fun isCameraCapabilitySupported(capability: CameraCapability): Boolean {
-        return selectedCameraInfo?.capabilities?.contains(capability) ?: false
-    }
-    
-    /**
-     * 카메라 팬(Pan) 각도 설정
-     * @param angle 팬 각도
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun setCameraPan(angle: Float, callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.PTZ_CONTROL)) {
-            callback?.invoke(false, "현재 카메라는 PTZ 제어를 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.panTo(angle, callback)
-    }
-    
-    /**
-     * 카메라 틸트(Tilt) 각도 설정
-     * @param angle 틸트 각도
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun setCameraTilt(angle: Float, callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.PTZ_CONTROL)) {
-            callback?.invoke(false, "현재 카메라는 PTZ 제어를 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.tiltTo(angle, callback)
-    }
-    
-    /**
-     * 카메라 줌 레벨 설정
-     * @param level 줌 레벨
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun setCameraZoom(level: Float, callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.ZOOM_CONTROL) && 
-            !isCameraCapabilitySupported(CameraCapability.PTZ_CONTROL)) {
-            callback?.invoke(false, "현재 카메라는 줌 제어를 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.zoomTo(level, callback)
-    }
-    
-    /**
-     * 카메라 사진 촬영
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun capturePhoto(callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.PHOTO_CAPTURE)) {
-            callback?.invoke(false, "현재 카메라는 사진 촬영을 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.capturePhoto(callback)
-    }
-    
-    /**
-     * 카메라 녹화 시작
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun startCameraRecording(callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.VIDEO_RECORDING)) {
-            callback?.invoke(false, "현재 카메라는 비디오 녹화를 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.startRecording(callback)
-    }
-    
-    /**
-     * 카메라 녹화 정지
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun stopCameraRecording(callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.VIDEO_RECORDING)) {
-            callback?.invoke(false, "현재 카메라는 비디오 녹화를 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.stopRecording(callback)
-    }
-    
-    /**
-     * 카메라 PTZ 상태 조회
-     * @param callback 결과 콜백 (성공/실패, 메시지, 상태 정보)
-     */
-    fun getCameraPTZStatus(callback: ((Boolean, String, Map<String, Any>?) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.PTZ_CONTROL)) {
-            callback?.invoke(false, "현재 카메라는 PTZ 제어를 지원하지 않습니다", null)
-            return
-        }
-        currentCameraController?.getPTZStatus(callback)
-    }
-    
-    /**
-     * 카메라 프리셋 위치로 이동
-     * @param presetId 프리셋 ID
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun moveCameraToPreset(presetId: Int, callback: ((Boolean, String) -> Unit)? = null) {
-        if (!isCameraCapabilitySupported(CameraCapability.PRESET_POSITIONS)) {
-            callback?.invoke(false, "현재 카메라는 프리셋 기능을 지원하지 않습니다")
-            return
-        }
-        currentCameraController?.moveToPreset(presetId, callback)
-    }
-    
-    /**
-     * C12 카메라 팬(Pan) 각도 설정 (하위 호환성)
-     * @param angle 팬 각도 (-180 ~ 180도)
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun setC12Pan(angle: Float, callback: ((Boolean, String) -> Unit)? = null) {
-        setCameraPan(angle, callback)
-    }
-    
-    /**
-     * C12 카메라 틸트(Tilt) 각도 설정 (하위 호환성)
-     * @param angle 틸트 각도 (-90 ~ 90도)
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun setC12Tilt(angle: Float, callback: ((Boolean, String) -> Unit)? = null) {
-        setCameraTilt(angle, callback)
-    }
-    
-    /**
-     * C12 카메라 요(Yaw) 각도 설정 (Pan과 동일, 하위 호환성)
-     * @param angle 요 각도 (-180 ~ 180도)
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun setC12Yaw(angle: Float, callback: ((Boolean, String) -> Unit)? = null) {
-        setCameraPan(angle, callback)
-    }
-    
-    /**
-     * C12 카메라 현재 PTZ 각도 읽어오기 (하위 호환성)
-     * @param callback 결과 콜백 (pan, tilt, yaw 각도)
-     */
-    fun getC12PTZAngles(callback: (Boolean, Float?, Float?, Float?, String) -> Unit) {
-        // 새로운 카메라 시스템 사용
-        getCameraPTZStatus { success, message, status ->
-            if (success && status != null) {
-                val pan = status["pan"]?.toString()?.toFloatOrNull() ?: 0.0f
-                val tilt = status["tilt"]?.toString()?.toFloatOrNull() ?: 0.0f
-                val yaw = pan // yaw는 pan과 동일
-                callback(true, pan, tilt, yaw, message)
-            } else {
-                callback(false, null, null, null, message)
-            }
-        }
-    }
-    
-    /**
-     * C12 카메라 사진 촬영 (하위 호환성)
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun captureC12Photo(callback: ((Boolean, String) -> Unit)? = null) {
-        capturePhoto(callback)
-    }
-    
-    /**
-     * C12 카메라 녹화 시작 (하위 호환성)
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun startC12Recording(callback: ((Boolean, String) -> Unit)? = null) {
-        startCameraRecording(callback)
-    }
-    
-    /**
-     * C12 카메라 녹화 정지 (하위 호환성)
-     * @param callback 결과 콜백 (성공/실패)
-     */
-    fun stopC12Recording(callback: ((Boolean, String) -> Unit)? = null) {
-        stopCameraRecording(callback)
     }
 
     /**
-     * 리소스 해제
+     * 플레이어 초기화 (ViewGroup 컨테이너에 VLCVideoLayout을 동적으로 추가)
      */
-    fun release() {
+    fun initialize(parent: ViewGroup): Boolean {
         try {
-            mediaPlayer?.stop()
-            mediaPlayer?.detachViews()
-            mediaPlayer?.release()
-            mediaPlayer = null
+    // XLABPlayer 초기화 시작
+            this.parentViewGroup = parent
+
+            val options = mutableListOf(
+                "--intf=dummy",
+                "--network-caching=1000",
+                "--no-audio",
+                "--avcodec-hw=any"
+            )
+            libVLC = LibVLC(context, options)
+            mediaPlayer = MediaPlayer(libVLC)
+
+            // 기존 레이아웃 제거
+            videoLayout?.let { parent.removeView(it) }
+            videoLayout = VLCVideoLayout(context)
+            parent.addView(videoLayout)
             
-            libVLC?.release()
-            libVLC = null
+            // MediaPlayer를 VideoLayout에 연결 (하드웨어 가속)
+            mediaPlayer?.attachViews(videoLayout!!, null, true, false)
             
-            surfaceView = null
-            // vlcVideoLayout = null  // 사용 안함
-            playbackListener = null
-            errorListener = null
+            setupEventListeners()
+            isInitialized = true
+            playerCallback?.onPlayerReady()
             
-            Log.d(TAG, "XlabPlayer 리소스 해제 완료")
+            // 자동으로 플레이어 창 크기에 맞춤
+            setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
             
+            // 크기 정보 출력
+            logSizeInfo()
+            return true
         } catch (e: Exception) {
-            Log.e(TAG, "리소스 해제 중 오류", e)
+            playerCallback?.onPlayerError("초기화 실패: ${e.message}")
+            return false
         }
     }
-}
+
+    private fun setupEventListeners() {
+        mediaPlayer?.setEventListener(object : MediaPlayer.EventListener {
+            override fun onEvent(event: MediaPlayer.Event) {
+                when (event.type) {
+                    MediaPlayer.Event.Playing -> {
+                        isPlaying = true
+                        isConnected = true
+                        updateButtonStates()
+                        playerCallback?.onPlayerPlaying()
+                        // 자동으로 플레이어 창 크기에 맞춤
+                        setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                        // 재생 시작 시 크기 정보 출력
+                        logSizeInfo()
+                    }
+                    MediaPlayer.Event.Paused -> {
+                        isPlaying = false
+                        updateButtonStates()
+                        playerCallback?.onPlayerPaused()
+                    }
+                    MediaPlayer.Event.Stopped -> {
+                        isPlaying = false
+                        isConnected = false
+                        updateButtonStates()
+                        playerCallback?.onPlayerDisconnected()
+                    }
+                    MediaPlayer.Event.EncounteredError -> {
+                        val errorMsg = when (event.type) {
+                            266 -> "H.265 코덱 지원 불가 또는 스트림 포맷 문제"
+                            else -> "재생 오류 (코드: ${event.type})"
+                        }
+                        isPlaying = false
+                        isConnected = false
+                        playerCallback?.onPlayerError(errorMsg)
+                    }
+                    MediaPlayer.Event.Vout -> {
+                        if (event.voutCount > 0) {
+                            // 자동으로 플레이어 창 크기에 맞춤
+                            setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                            // 비디오 출력 시작 시 크기 정보 출력
+                            logSizeInfo()
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    fun connectAndPlay(url: String = DEFAULT_RTSP_URL): Boolean {
+        try {
+            if (!isInitialized) {
+                playerCallback?.onPlayerError("플레이어가 초기화되지 않음")
+                return false
+            }
+            
+            releaseMedia()
+            
+            // Media 객체 생성 (URI로 명시적 생성)
+            media = Media(libVLC, android.net.Uri.parse(url))
+            if (media == null) {
+                playerCallback?.onPlayerError("Media 객체 생성 실패")
+                return false
+            }
+// Media 객체 생성 성공
+            
+            // RTSP 옵션 설정 (단순화)
+            media?.addOption(":network-caching=1000")
+            
+            // Media를 MediaPlayer에 설정
+            mediaPlayer?.media = media
+            if (mediaPlayer?.media == null) {
+                playerCallback?.onPlayerError("Media 설정 실패")
+                return false
+            }
+            
+            // 재생 시작
+            val playResult = mediaPlayer?.play()
+            
+            currentUrl = url
+            isConnected = true
+            playerCallback?.onPlayerConnected()
+            return true
+        } catch (e: Exception) {
+            playerCallback?.onPlayerError("연결 실패: ${e.message}")
+            return false
+        }
+    }
+
+    fun play(): Boolean {
+        return try {
+            if (isConnected && !isPlaying) {
+                mediaPlayer?.play()
+                isPlaying = true
+                playerCallback?.onPlayerPlaying()
+        // 재생 시작
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun pause(): Boolean {
+        return try {
+            if (isPlaying) {
+                mediaPlayer?.pause()
+                isPlaying = false
+                playerCallback?.onPlayerPaused()
+        // 일시정지
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun stop(): Boolean {
+        return try {
+            mediaPlayer?.stop()
+            isPlaying = false
+            isConnected = false
+            playerCallback?.onPlayerDisconnected()
+    // 정지
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    fun disconnect(): Boolean {
+        return try {
+            stop()
+            releaseMedia()
+            isConnected = false
+            currentUrl = ""
+    // 연결 해제
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun releaseMedia() {
+        try {
+            media?.release()
+            media = null
+        } catch (e: Exception) {
+            // 미디어 해제 실패 (무시)
+        }
+    }
+
+    fun release() {
+        try {
+    // 플레이어 해제 시작
+            
+            // 강제 정지로 RTSP 세션 정리
+            if (isPlaying || isConnected) {
+                try {
+                    mediaPlayer?.stop()
+                    Thread.sleep(200) // RTSP TEARDOWN 대기
+                            } catch (e: Exception) {
+                // 정지 중 오류 (무시)
+            }
+            }
+            
+            // 미디어 해제
+            releaseMedia()
+            
+            // MediaPlayer 완전 해제
+            try {
+                mediaPlayer?.detachViews()
+                mediaPlayer?.release()
+            } catch (e: Exception) {
+                // MediaPlayer 해제 중 오류 (무시)
+            }
+            mediaPlayer = null
+            
+            // LibVLC 해제
+            try {
+                libVLC?.release()
+            } catch (e: Exception) {
+                // LibVLC 해제 중 오류 (무시)
+            }
+            libVLC = null
+            
+            // UI 정리
+            videoLayout?.let { layout ->
+                try {
+                    parentViewGroup?.removeView(layout)
+                } catch (e: Exception) {
+                    // VideoLayout 제거 중 오류 (무시)
+                }
+            }
+            videoLayout = null
+            parentViewGroup = null
+            
+            // 라이프사이클 감지 해제
+            if (isLifecycleRegistered) {
+                try {
+                    ProcessLifecycleOwner.get().lifecycle.removeObserver(this)
+                    isLifecycleRegistered = false
+        // 라이프사이클 감지 해제
+                } catch (e: Exception) {
+                    // 라이프사이클 해제 실패 (무시)
+                }
+            }
+            
+            // 상태 초기화
+            isInitialized = false
+            isPlaying = false
+            isConnected = false
+            currentUrl = ""
+            
+// 플레이어 해제 완료
+        } catch (e: Exception) {
+            // 플레이어 해제 실패 (무시)
+        }
+    }
+
+    /**
+     * 앱이 백그라운드로 이동할 때
+     */
+    @OnLifecycleEvent(Lifecycle.Event.ON_STOP)
+    fun onAppBackground() {
+// 앱 백그라운드 - 재생 일시정지
+        if (isPlaying) {
+            try {
+                pause()
+            } catch (e: Exception) {
+                // 백그라운드 일시정지 실패 (무시)
+            }
+        }
+    }
+    
+    /**
+     * 앱이 포그라운드로 복귀할 때
+     */
+    @OnLifecycleEvent(Lifecycle.Event.ON_START)
+    fun onAppForeground() {
+// 앱 포그라운드 복귀
+        // 필요시 재생 재개 로직 추가 가능
+    }
+    
+    /**
+     * 앱 프로세스가 종료될 때
+     */
+    @OnLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+    fun onAppDestroy() {
+// 앱 프로세스 종료 감지 - 자동 해제
+        try {
+            release()
+        } catch (e: Exception) {
+            // 자동 해제 실패 (무시)
+        }
+    }
+
+    fun setCallback(callback: PlayerCallback) {
+        this.playerCallback = callback
+    }
+
+
+
+    /**
+     * 버튼 컨테이너 추가 (플레이어 아래쪽)
+     */
+    fun addButtonContainer(parent: ViewGroup): LinearLayout {
+        // 기존 버튼 컨테이너 제거
+        buttonContainer?.let { parent.removeView(it) }
+        
+        // 새 버튼 컨테이너 생성
+        buttonContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            setPadding(16, 8, 16, 8)
+        }
+        
+        parent.addView(buttonContainer)
+        return buttonContainer!!
+    }
+    
+    /**
+     * 단일 버튼 추가
+     */
+    fun addButton(
+        text: String,
+        type: XLABPlayerButton.ButtonType = XLABPlayerButton.ButtonType.PRIMARY,
+        clickListener: (() -> Unit)? = null
+    ): XLABPlayerButton {
+        val button = XLABPlayerButton.create(context, text, type, clickListener)
+        playerButtons.add(button)
+        
+        buttonContainer?.addView(button.buttonView)
+        return button
+    }
+    
+    /**
+     * 여러 버튼 한 번에 추가
+     */
+    fun addButtons(vararg buttonConfigs: Triple<String, XLABPlayerButton.ButtonType, (() -> Unit)?>): List<XLABPlayerButton> {
+        val buttons = buttonConfigs.map { (text, type, listener) ->
+            addButton(text, type, listener)
+        }
+        return buttons
+    }
+    
+    /**
+     * 기본 플레이어 컨트롤 버튼들 추가
+     */
+    fun addDefaultControlButtons(): Map<String, XLABPlayerButton> {
+        val buttons = mutableMapOf<String, XLABPlayerButton>()
+        
+        // 연결 버튼
+        buttons["connect"] = addButton("연결", XLABPlayerButton.ButtonType.PRIMARY) {
+            connectAndPlay()
+        }
+        
+        // 재생 버튼
+        buttons["play"] = addButton("재생", XLABPlayerButton.ButtonType.SUCCESS) {
+            play()
+        }
+        
+        // 일시정지 버튼
+        buttons["pause"] = addButton("일시정지", XLABPlayerButton.ButtonType.WARNING) {
+            pause()
+        }
+        
+        // 정지 버튼
+        buttons["stop"] = addButton("정지", XLABPlayerButton.ButtonType.SECONDARY) {
+            stop()
+        }
+        
+
+        
+        // 해제 버튼
+        buttons["disconnect"] = addButton("해제", XLABPlayerButton.ButtonType.DANGER) {
+            disconnect()
+        }
+        
+        return buttons
+    }
+    
+    /**
+     * 스케일링 컨트롤 버튼 추가
+     */
+    fun addScalingControlButton(): XLABPlayerButton {
+        var currentMode = VideoScaleMode.FIT_WINDOW
+        
+        val scaleButton = addButton("맞춤", XLABPlayerButton.ButtonType.SECONDARY) {
+            // 순환적으로 모드 변경
+            currentMode = when (currentMode) {
+                VideoScaleMode.FIT_WINDOW -> VideoScaleMode.FILL_WINDOW
+                VideoScaleMode.FILL_WINDOW -> VideoScaleMode.STRETCH
+                VideoScaleMode.STRETCH -> VideoScaleMode.ORIGINAL_SIZE
+                VideoScaleMode.ORIGINAL_SIZE -> VideoScaleMode.FIT_WINDOW
+            }
+            
+            setVideoScaleMode(currentMode)
+            
+            // 로그로 현재 모드 표시
+// 스케일링 모드 변경
+        }
+        
+        return scaleButton
+    }
+    
+    /**
+     * 버튼 상태 자동 업데이트
+     */
+    fun updateButtonStates() {
+        playerButtons.forEach { button ->
+            when (button.buttonView.text.toString()) {
+                "연결" -> button.isEnabled = isInitialized && !isConnected
+                "재생" -> button.isEnabled = isConnected && !isPlaying
+                "일시정지" -> button.isEnabled = isConnected && isPlaying
+                "정지" -> button.isEnabled = isConnected
+
+                "해제" -> button.isEnabled = isConnected
+            }
+        }
+    }
+    
+    /**
+     * 모든 버튼 제거
+     */
+    fun clearButtons() {
+        buttonContainer?.removeAllViews()
+        playerButtons.clear()
+    }
+
+    /**
+     * 비디오 스케일링 모드 설정
+     */
+    fun setVideoScaleMode(mode: VideoScaleMode) {
+        videoLayout?.let { layout ->
+            val params = layout.layoutParams
+            when (mode) {
+                VideoScaleMode.FIT_WINDOW -> {
+                    // 전체화면 상태가 아닐 때만 스케일링 조정
+                    if (!isFullscreen) {
+                        // 플레이어 크기에 맞춤 (강제 확대)
+                        params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                        params.height = ViewGroup.LayoutParams.MATCH_PARENT
+                        layout.layoutParams = params
+                        
+                        // 기본 2배 확대
+                        layout.scaleX = 2.0f
+                        layout.scaleY = 2.0f
+                    }
+// 창에 맞춤 (강제 확대)
+                }
+                VideoScaleMode.FILL_WINDOW -> {
+                    // 플레이어 크기를 완전히 채움
+                    params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    params.height = ViewGroup.LayoutParams.MATCH_PARENT
+                    layout.layoutParams = params
+                    layout.scaleX = 3.0f // 3배 확대
+                    layout.scaleY = 3.0f
+// 창 채움
+                }
+                VideoScaleMode.ORIGINAL_SIZE -> {
+                    // 원본 크기 유지
+                    params.width = ViewGroup.LayoutParams.WRAP_CONTENT
+                    params.height = ViewGroup.LayoutParams.WRAP_CONTENT
+                    layout.layoutParams = params
+                    layout.scaleX = 1f
+                    layout.scaleY = 1f
+// 원본 크기
+                }
+                VideoScaleMode.STRETCH -> {
+                    // 늘려서 완전히 채움
+                    params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    params.height = ViewGroup.LayoutParams.MATCH_PARENT
+                    layout.layoutParams = params
+                    layout.scaleX = 4.0f // 4배 확대
+                    layout.scaleY = 4.0f
+// 늘림
+                }
+            }
+        }
+    }
+    
+    /**
+     * 비디오 스케일링 모드 열거형
+     */
+    enum class VideoScaleMode {
+        FIT_WINDOW,    // 창에 맞춤 (비율 유지)
+        FILL_WINDOW,   // 창 채움 (16:9 강제)
+        ORIGINAL_SIZE, // 원본 크기
+        STRETCH        // 늘려서 채움
+    }
+
+    fun isPlayerReady(): Boolean = isInitialized
+    fun isPlayerPlaying(): Boolean = isPlaying
+    fun isPlayerConnected(): Boolean = isConnected
+    fun getCurrentUrl(): String = currentUrl
+    
+    /**
+     * 전체화면 토글
+     */
+    fun toggleFullscreen() {
+        if (!isInitialized || videoLayout == null) {
+            return
+        }
+        
+        try {
+            if (isFullscreen) {
+                // 전체화면 해제
+                exitFullscreen()
+            } else {
+                // 전체화면 진입
+                enterFullscreen()
+            }
+        } catch (e: Exception) {
+            // 토글 실패 시 상태 리셋
+            isFullscreen = false
+            fullscreenButton?.setAsTransparentIconButton("⧈")
+        }
+    }
+    
+    /**
+     * 전체화면 진입 (스케일링으로만 처리)
+     */
+    private fun enterFullscreen() {
+        try {
+            videoLayout?.let { layout ->
+                // 현재 레이아웃 파라미터는 변경하지 않고 스케일링만 조정
+                originalLayoutParams = layout.layoutParams
+                
+                // 큰 스케일로 전체화면 효과
+                layout.scaleX = 3.0f
+                layout.scaleY = 3.0f
+                
+                isFullscreen = true
+                
+                // 버튼 아이콘 업데이트 (UI 스레드에서 실행)
+                layout.post {
+                    fullscreenButton?.setAsTransparentIconButton("⧉") // 복원 아이콘 (작은 사각형)
+                }
+            }
+        } catch (e: Exception) {
+            // 전체화면 진입 실패 시 안전하게 처리
+            isFullscreen = false
+        }
+    }
+    
+    /**
+     * 전체화면 해제 (스케일링 복원)
+     */
+    private fun exitFullscreen() {
+        try {
+            videoLayout?.let { layout ->
+                isFullscreen = false
+                
+                // 버튼 아이콘 업데이트 (UI 스레드에서 실행)
+                layout.post {
+                    fullscreenButton?.setAsTransparentIconButton("⧈") // 전체화면 아이콘 (큰 사각형)
+                    // 기존 스케일링 모드 재적용 (UI 업데이트 후)
+                    setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                }
+            }
+        } catch (e: Exception) {
+            // 전체화면 해제 실패 시 안전하게 처리
+            isFullscreen = false
+            fullscreenButton?.setAsTransparentIconButton("⧈")
+        }
+    }
+    
+    /**
+     * 전체화면 상태 확인
+     */
+    fun isInFullscreen(): Boolean = isFullscreen
+    
+    /**
+     * 전체화면 버튼 추가 (비디오 위에 오버레이, 오른쪽 위)
+     */
+    fun addFullscreenButton(): XLABPlayerButton {
+        parentViewGroup?.let { parent ->
+            // 전체화면 아이콘 버튼을 비디오 위에 오버레이로 생성
+            val fullscreenBtn = XLABPlayerButton.create(
+                parent.context,
+                "⛶", // 전체화면 아이콘 (유니코드)
+                XLABPlayerButton.ButtonType.SECONDARY
+            ) {
+                toggleFullscreen()
+            }
+            
+            // 투명 아이콘 버튼으로 설정
+            fullscreenBtn.setAsTransparentIconButton(if (isFullscreen) "⧉" else "⧈")
+            
+            // 버튼을 FrameLayout의 오른쪽 위에 배치 (right: 10px, top: 10px)
+            val layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                android.view.Gravity.END or android.view.Gravity.TOP
+            ).apply {
+                setMargins(0, 10, 10, 0) // left, top, right, bottom
+            }
+            
+            fullscreenBtn.buttonView.layoutParams = layoutParams
+            
+            // 부모 컨테이너에 직접 추가
+            parent.addView(fullscreenBtn.buttonView)
+            
+            fullscreenButton = fullscreenBtn
+            return fullscreenBtn
+        }
+        
+        // fallback: 기존 방식
+        val fallbackBtn = addButton("⧈", XLABPlayerButton.ButtonType.SECONDARY) {
+            toggleFullscreen()
+        }
+        fallbackBtn.setAsTransparentIconButton("⧈")
+        return fallbackBtn
+    }
+    
+    /**
+     * 플레이어 창 크기와 영상 크기 정보 출력
+     */
+    private fun logSizeInfo() {
+        videoLayout?.let { layout ->
+            // 플레이어 창 크기
+            val playerWidth = layout.width
+            val playerHeight = layout.height
+            
+            // 영상 크기는 VLC에서 직접 가져오기 어려움
+            // 대신 실제 렌더링 크기 확인
+            val videoWidth = 0  // VLC API 한계로 임시값
+            val videoHeight = 0
+            
+            Log.d(TAG, "========== 크기 정보 ==========")
+            Log.d(TAG, "플레이어 창: ${playerWidth} x ${playerHeight}")
+            Log.d(TAG, "VLC 레이아웃: ${layout.scaleX}x, ${layout.scaleY}x")
+            
+            if (playerWidth > 0 && playerHeight > 0) {
+                val playerRatio = playerWidth.toFloat() / playerHeight.toFloat()
+                Log.d(TAG, "플레이어 비율: %.2f".format(playerRatio))
+                
+                if (playerRatio > 1.5) {
+                    Log.d(TAG, "📺 가로형 플레이어")
+                } else if (playerRatio < 0.8) {
+                    Log.d(TAG, "📱 세로형 플레이어")
+                } else {
+                    Log.d(TAG, "⚖️ 정사각형 플레이어")
+                }
+            }
+            Log.d(TAG, "=============================")
+        }
+    }
+} 
