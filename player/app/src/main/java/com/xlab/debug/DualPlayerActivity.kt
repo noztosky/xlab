@@ -80,123 +80,61 @@ class DualPlayerActivity : AppCompatActivity() {
      * 첫 번째 플레이어 설정
      */
     private fun setupPlayer1() {
-        try {
-            xlabPlayer1 = XLABPlayer(this)
-            
-            xlabPlayer1?.setCallback(object : XLABPlayer.PlayerCallback {
-                override fun onPlayerReady() {
-                    runOnUiThread { updateButtonStates1() }
-                }
-                
-                override fun onPlayerConnected() {
-                    runOnUiThread { updateButtonStates1() }
-                }
-                
-                override fun onPlayerDisconnected() {
-                    runOnUiThread { updateButtonStates1() }
-                }
-                
-                override fun onPlayerPlaying() {
-                    runOnUiThread { updateButtonStates1() }
-                }
-                
-                override fun onPlayerPaused() {
-                    runOnUiThread { updateButtonStates1() }
-                }
-                
-                override fun onPlayerError(error: String) {
-                    runOnUiThread {
-                        updateButtonStates1()
-                        Toast.makeText(this@DualPlayerActivity, "플레이어1 오류: $error", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                
-                override fun onVideoSizeChanged(width: Int, height: Int) {
-                    // 비디오 크기 변경 처리
-                }
-                
-                override fun onPtzCommand(command: String, success: Boolean) {
-                    // PTZ 명령 처리
-                }
-            })
-            
-            val success = xlabPlayer1?.initialize(videoContainer1) ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어1 초기화 실패", Toast.LENGTH_LONG).show()
-            } else {
-                xlabPlayer1?.addFullscreenButton()
-                xlabPlayer1?.addRecordButton()
-                xlabPlayer1?.addCaptureButton()
-                xlabPlayer1?.setCameraServer("c12", "http://192.168.144.108:5000", 1)
-                xlabPlayer1?.showPtzControl()
-            }
-            
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 설정 실패", Toast.LENGTH_LONG).show()
+        xlabPlayer1 = createPlayer("플레이어1", ::updateButtonStates1).also { player ->
+            initializePlayer(player, videoContainer1, "플레이어1", 1)
         }
     }
     
     /**
-     * 두 번째 플레이어 초기화 및 설정
+     * 두 번째 플레이어 설정
      */
     private fun setupPlayer2() {
-        try {
-            xlabPlayer2 = XLABPlayer(this)
-            
-            // 두 번째 플레이어 콜백 설정
-            xlabPlayer2?.setCallback(object : XLABPlayer.PlayerCallback {
-                override fun onPlayerReady() {
-                    runOnUiThread { updateButtonStates2() }
-                }
-                
-                override fun onPlayerConnected() {
-                    runOnUiThread { updateButtonStates2() }
-                }
-                
-                override fun onPlayerDisconnected() {
-                    runOnUiThread { updateButtonStates2() }
-                }
-                
-                override fun onPlayerPlaying() {
-                    runOnUiThread { updateButtonStates2() }
-                }
-                
-                override fun onPlayerPaused() {
-                    runOnUiThread { updateButtonStates2() }
-                }
-                
-                override fun onPlayerError(error: String) {
-                    runOnUiThread {
-                        updateButtonStates2()
-                        Toast.makeText(this@DualPlayerActivity, "플레이어2 오류: $error", Toast.LENGTH_LONG).show()
+        xlabPlayer2 = createPlayer("플레이어2", ::updateButtonStates2).also { player ->
+            initializePlayer(player, videoContainer2, "플레이어2", 2)
+        }
+    }
+    
+    /**
+     * 공통 플레이어 생성
+     */
+    private fun createPlayer(playerName: String, updateStates: () -> Unit): XLABPlayer? {
+        return try {
+            XLABPlayer(this).apply {
+                setCallback(object : XLABPlayer.PlayerCallback {
+                    override fun onPlayerReady() = runOnUiThread { updateStates() }
+                    override fun onPlayerConnected() = runOnUiThread { updateStates() }
+                    override fun onPlayerDisconnected() = runOnUiThread { updateStates() }
+                    override fun onPlayerPlaying() = runOnUiThread { updateStates() }
+                    override fun onPlayerPaused() = runOnUiThread { updateStates() }
+                    override fun onPlayerError(error: String) = runOnUiThread {
+                        updateStates()
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 오류: $error", Toast.LENGTH_SHORT).show()
                     }
-                }
-                
-                override fun onVideoSizeChanged(width: Int, height: Int) {
-                    // 비디오 크기 변경 처리
-                }
-                
-                override fun onPtzCommand(command: String, success: Boolean) {
-                    // PTZ 명령 처리
-                }
-            })
-            
-            // 두 번째 플레이어 초기화
-            val success = xlabPlayer2?.initialize(videoContainer2) ?: false
-            if (success) {
-                xlabPlayer2?.addFullscreenButton()
-                xlabPlayer2?.addRecordButton()
-                xlabPlayer2?.addCaptureButton()
-                xlabPlayer2?.showPtzControl()
-                
-                // 카메라 서버 설정
-                xlabPlayer2?.setCameraServer("c12", "http://192.168.144.108:5000", 2)
-            } else {
-                Toast.makeText(this, "플레이어2 초기화 실패", Toast.LENGTH_LONG).show()
+                    override fun onVideoSizeChanged(width: Int, height: Int) = Unit
+                    override fun onPtzCommand(command: String, success: Boolean) = Unit
+                })
             }
-            
         } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 설정 실패: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "$playerName 설정 실패", Toast.LENGTH_LONG).show()
+            null
+        }
+    }
+    
+    /**
+     * 공통 플레이어 초기화
+     */
+    private fun initializePlayer(player: XLABPlayer?, container: FrameLayout, playerName: String, cameraId: Int) {
+        val success = player?.initialize(container) ?: false
+        if (!success) {
+            Toast.makeText(this, "$playerName 초기화 실패", Toast.LENGTH_LONG).show()
+        } else {
+            player?.apply {
+                addFullscreenButton()
+                addRecordButton()
+                addCaptureButton()
+                setCameraServer("c12", "http://192.168.144.108:5000", cameraId)
+                showPtzControl()
+            }
         }
     }
     
@@ -223,117 +161,86 @@ class DualPlayerActivity : AppCompatActivity() {
         updateButtonStates2()
     }
     
+    // 공통 플레이어 제어 헬퍼 메서드
+    private fun executePlayerAction(
+        player: XLABPlayer?,
+        playerName: String,
+        action: () -> Boolean?,
+        actionName: String
+    ) {
+        try {
+            val success = action() ?: false
+            if (!success) {
+                Toast.makeText(this, "$playerName $actionName 불가", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "$playerName $actionName 실패", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // 첫 번째 플레이어 제어 메서드들
-    private fun connectPlayer1() {
-        try {
-            // 첫 번째 플레이어는 기본 주소 사용
-            val success = xlabPlayer1?.connectAndPlay("rtsp://192.168.144.108:554/stream=1") ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어1 연결 실패", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 연결 오류: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun connectPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
+        xlabPlayer1?.connectAndPlay("rtsp://192.168.144.108:554/stream=1")
+    }, "연결")
     
-    private fun playPlayer1() {
-        try {
-            val success = xlabPlayer1?.play() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어1 재생 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 재생 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun playPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
+        xlabPlayer1?.play()
+    }, "재생")
     
-    private fun pausePlayer1() {
-        try {
-            val success = xlabPlayer1?.pause() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어1 일시정지 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 일시정지 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun pausePlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
+        xlabPlayer1?.pause()
+    }, "일시정지")
     
-    private fun stopPlayer1() {
-        try {
-            val success = xlabPlayer1?.stop() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어1 정지 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 정지 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun stopPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
+        xlabPlayer1?.stop()
+    }, "정지")
     
-    private fun disconnectPlayer1() {
-        try {
-            val success = xlabPlayer1?.disconnect() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어1 연결 해제 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어1 연결 해제 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun disconnectPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
+        xlabPlayer1?.disconnect()
+    }, "연결 해제")
     
     // 두 번째 플레이어 제어 메서드들
-    private fun connectPlayer2() {
-        try {
-            // 두 번째 플레이어는 555 포트 사용
-            val success = xlabPlayer2?.connectAndPlay("rtsp://192.168.144.108:555/stream=2") ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어2 연결 실패", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 연결 오류: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun connectPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
+        xlabPlayer2?.connectAndPlay("rtsp://192.168.144.108:555/stream=2")
+    }, "연결")
     
-    private fun playPlayer2() {
-        try {
-            val success = xlabPlayer2?.play() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어2 재생 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 재생 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun playPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
+        xlabPlayer2?.play()
+    }, "재생")
     
-    private fun pausePlayer2() {
-        try {
-            val success = xlabPlayer2?.pause() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어2 일시정지 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 일시정지 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun pausePlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
+        xlabPlayer2?.pause()
+    }, "일시정지")
     
-    private fun stopPlayer2() {
-        try {
-            val success = xlabPlayer2?.stop() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어2 정지 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 정지 실패", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun stopPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
+        xlabPlayer2?.stop()
+    }, "정지")
     
-    private fun disconnectPlayer2() {
-        try {
-            val success = xlabPlayer2?.disconnect() ?: false
-            if (!success) {
-                Toast.makeText(this, "플레이어2 연결 해제 불가", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "플레이어2 연결 해제 실패", Toast.LENGTH_SHORT).show()
+    private fun disconnectPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
+        xlabPlayer2?.disconnect()
+    }, "연결 해제")
+    
+    /**
+     * 공통 버튼 상태 업데이트 헬퍼 메서드
+     */
+    private fun updatePlayerButtonStates(
+        player: XLABPlayer?,
+        connectButton: Button,
+        playButton: Button,
+        pauseButton: Button,
+        stopButton: Button,
+        disconnectButton: Button
+    ) {
+        player?.let { p ->
+            val isReady = p.isPlayerReady()
+            val isConnected = p.isPlayerConnected()
+            val isPlaying = p.isPlayerPlaying()
+            
+            connectButton.isEnabled = isReady && !isConnected
+            playButton.isEnabled = isConnected && !isPlaying
+            pauseButton.isEnabled = isConnected && isPlaying
+            stopButton.isEnabled = isConnected
+            disconnectButton.isEnabled = isConnected
         }
     }
     
@@ -341,34 +248,16 @@ class DualPlayerActivity : AppCompatActivity() {
      * 첫 번째 플레이어 버튼 상태 업데이트
      */
     private fun updateButtonStates1() {
-        xlabPlayer1?.let { player ->
-            val isReady = player.isPlayerReady()
-            val isConnected = player.isPlayerConnected()
-            val isPlaying = player.isPlayerPlaying()
-            
-            connectButton1.isEnabled = isReady && !isConnected
-            playButton1.isEnabled = isConnected && !isPlaying
-            pauseButton1.isEnabled = isConnected && isPlaying
-            stopButton1.isEnabled = isConnected
-            disconnectButton1.isEnabled = isConnected
-        }
+        updatePlayerButtonStates(xlabPlayer1, connectButton1, playButton1, 
+            pauseButton1, stopButton1, disconnectButton1)
     }
     
     /**
      * 두 번째 플레이어 버튼 상태 업데이트
      */
     private fun updateButtonStates2() {
-        xlabPlayer2?.let { player ->
-            val isReady = player.isPlayerReady()
-            val isConnected = player.isPlayerConnected()
-            val isPlaying = player.isPlayerPlaying()
-            
-            connectButton2.isEnabled = isReady && !isConnected
-            playButton2.isEnabled = isConnected && !isPlaying
-            pauseButton2.isEnabled = isConnected && isPlaying
-            stopButton2.isEnabled = isConnected
-            disconnectButton2.isEnabled = isConnected
-        }
+        updatePlayerButtonStates(xlabPlayer2, connectButton2, playButton2, 
+            pauseButton2, stopButton2, disconnectButton2)
     }
     
     override fun onDestroy() {

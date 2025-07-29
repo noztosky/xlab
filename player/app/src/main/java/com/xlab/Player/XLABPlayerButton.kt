@@ -110,13 +110,8 @@ class XLABPlayerButton(
      * 버튼 타입에 따른 색상 반환
      */
     private fun getButtonColors(): Pair<Int, Int> {
-        return when (buttonType) {
-            ButtonType.PRIMARY -> Pair(Color.parseColor("#2196F3"), Color.parseColor("#1976D2"))
-            ButtonType.SUCCESS -> Pair(Color.parseColor("#4CAF50"), Color.parseColor("#388E3C"))
-            ButtonType.WARNING -> Pair(Color.parseColor("#FF9800"), Color.parseColor("#F57C00"))
-            ButtonType.DANGER -> Pair(Color.parseColor("#F44336"), Color.parseColor("#D32F2F"))
-            ButtonType.SECONDARY -> Pair(Color.parseColor("#9E9E9E"), Color.parseColor("#757575"))
-        }
+        val (normal, pressed) = BUTTON_COLORS[buttonType] ?: BUTTON_COLORS[ButtonType.PRIMARY]!!
+        return Pair(Color.parseColor(normal), Color.parseColor(pressed))
     }
     
     /**
@@ -134,21 +129,17 @@ class XLABPlayerButton(
     }
     
     /**
-     * 버튼을 아이콘 형태로 설정 (사각형)
+     * 버튼을 아이콘 형태로 설정 (간소화)
      */
-    fun setAsIconButton(icon: String) {
+    fun setAsIconButton(icon: String, size: Int = 40) {
         buttonView.text = icon
         buttonView.textSize = 20f
         buttonView.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8))
-        
-        // 투명 배경 설정
         buttonView.background = null
         buttonView.setTextColor(Color.WHITE)
-        
-        // 정사각형으로 만들기
-        setSize(40, 40)
+        setSize(size, size)
     }
-    
+
     /**
      * 투명 배경의 전체화면 버튼 스타일
      */
@@ -169,32 +160,57 @@ class XLABPlayerButton(
     }
     
     /**
-     * PTZ 컨트롤 버튼 스타일
+     * 공통 스타일 설정 헬퍼 메서드
      */
-    fun setAsPtzButton() {
-        buttonView.textSize = 20f// 24f에서 10% 감소 (24f * 0.9 = 21.6f ≈ 22f)
-        buttonView.setPadding(0, 0, 0, 0)
-        buttonView.setTextColor(Color.WHITE)
+    private fun applyButtonStyle(
+        textSize: Float,
+        textColor: Int = Color.WHITE,
+        padding: Int = 0,
+        normalColor: String,
+        pressedColor: String,
+        shape: Int = GradientDrawable.OVAL,
+        cornerRadius: Float = 0f,
+        shadowRadius: Float = 4f
+    ) {
+        buttonView.textSize = textSize
+        buttonView.setPadding(padding, padding, padding, padding)
+        buttonView.setTextColor(textColor)
         
-        // PTZ 전용 배경 (둥근 모서리, 반투명)
         val drawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = 8f // 둥근 모서리 적용
-            setColor(Color.parseColor("#80444444"))
+            this.shape = shape
+            if (shape == GradientDrawable.RECTANGLE && cornerRadius > 0) {
+                this.cornerRadius = cornerRadius
+            }
+            setColor(Color.parseColor(normalColor))
         }
         
-        // 눌림 효과
         val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
             addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8f // 둥근 모서리 적용
-                setColor(Color.parseColor("#80666666"))
+                this.shape = shape
+                if (shape == GradientDrawable.RECTANGLE && cornerRadius > 0) {
+                    this.cornerRadius = cornerRadius
+                }
+                setColor(Color.parseColor(pressedColor))
             })
             addState(intArrayOf(), drawable)
         }
         
         buttonView.background = stateDrawable
-        buttonView.setShadowLayer(3f, 2f, 2f, Color.parseColor("#40000000")) // 그림자도 조금 더 진하게
+        buttonView.setShadowLayer(shadowRadius, 2f, 2f, Color.parseColor("#40000000"))
+    }
+
+    /**
+     * PTZ 컨트롤 버튼 스타일
+     */
+    fun setAsPtzButton() {
+        applyButtonStyle(
+            textSize = 20f,
+            normalColor = "#80444444",
+            pressedColor = "#80666666",
+            shape = GradientDrawable.RECTANGLE,
+            cornerRadius = 8f,
+            shadowRadius = 3f
+        )
     }
 
     /**
@@ -202,108 +218,50 @@ class XLABPlayerButton(
      */
     fun setAsFullscreenButton(icon: String) {
         buttonView.text = icon
-        buttonView.textSize = 14f
-        buttonView.setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
-        buttonView.setTextColor(Color.WHITE)
-        
-        // PTZ와 동일한 배경 스타일 적용
-        val drawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = 8f // 둥근 모서리
-            setColor(Color.parseColor("#80444444")) // PTZ와 같은 투명도
-        }
-        
-        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 8f
-                setColor(Color.parseColor("#80666666"))
-            })
-            addState(intArrayOf(), drawable)
-        }
-        
-        buttonView.background = stateDrawable
-        buttonView.setShadowLayer(3f, 2f, 2f, Color.parseColor("#40000000"))
+        applyButtonStyle(
+            textSize = 14f,
+            padding = dpToPx(4),
+            normalColor = "#80444444",
+            pressedColor = "#80666666",
+            shape = GradientDrawable.RECTANGLE,
+            cornerRadius = 8f,
+            shadowRadius = 3f
+        )
     }
 
     /**
      * 녹화 버튼 스타일 (빨간색 원형)
      */
     fun setAsRecordButton() {
-        buttonView.textSize = 16f
-        buttonView.setPadding(0, 0, 0, 0)
-        buttonView.setTextColor(Color.WHITE)
-        
-        // 빨간색 원형 배경
-        val drawable = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL // 원형
-            setColor(Color.parseColor("#FF4444")) // 빨간색
-        }
-        
-        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#CC3333")) // 눌렸을 때 더 어두운 빨간색
-            })
-            addState(intArrayOf(), drawable)
-        }
-        
-        buttonView.background = stateDrawable
-        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#40000000"))
+        applyButtonStyle(
+            textSize = 16f,
+            normalColor = "#FF4444",
+            pressedColor = "#CC3333"
+        )
     }
 
     /**
      * 녹화 중 버튼 스타일 (깜빡이는 효과)
      */
     fun setAsRecordButtonRecording() {
-        buttonView.textSize = 14f
-        buttonView.setPadding(0, 0, 0, 0)
-        buttonView.setTextColor(Color.WHITE)
-        
-        // 녹화 중 - 더 진한 빨간색 사각형
-        val drawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = 4f // 약간 둥근 사각형
-            setColor(Color.parseColor("#DD0000")) // 더 진한 빨간색
-        }
-        
-        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 4f
-                setColor(Color.parseColor("#AA0000"))
-            })
-            addState(intArrayOf(), drawable)
-        }
-        
-        buttonView.background = stateDrawable
-        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#40000000"))
+        applyButtonStyle(
+            textSize = 14f,
+            normalColor = "#DD0000",
+            pressedColor = "#AA0000",
+            shape = GradientDrawable.RECTANGLE,
+            cornerRadius = 4f
+        )
     }
 
     /**
      * 사진 촬영 버튼 스타일 (파란색 원형)
      */
     fun setAsCaptureButton() {
-        buttonView.textSize = 14f
-        buttonView.setPadding(0, 0, 0, 0)
-        buttonView.setTextColor(Color.WHITE)
-        
-        // 파란색 원형 배경
-        val drawable = GradientDrawable().apply {
-            shape = GradientDrawable.OVAL
-            setColor(Color.parseColor("#2196F3")) // 파란색
-        }
-        
-        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
-            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor("#1976D2")) // 누를 때 더 진한 파란색
-            })
-            addState(intArrayOf(), drawable)
-        }
-        
-        buttonView.background = stateDrawable
-        buttonView.setShadowLayer(4f, 2f, 2f, Color.parseColor("#40000000"))
+        applyButtonStyle(
+            textSize = 14f,
+            normalColor = "#2196F3",
+            pressedColor = "#1976D2"
+        )
     }
 
     /**
@@ -316,11 +274,11 @@ class XLABPlayerButton(
     }
     
     /**
-     * FrameLayout용 마진 설정
+     * FrameLayout용 마진 설정 (크기 고정 제거)
      */
     fun setFrameLayoutMargin(leftDp: Int, topDp: Int, rightDp: Int, bottomDp: Int, gravity: Int) {
         val params = android.widget.FrameLayout.LayoutParams(
-            dpToPx(30), dpToPx(30), gravity
+            dpToPx(36), dpToPx(36), gravity
         ).apply {
             setMargins(dpToPx(leftDp), dpToPx(topDp), dpToPx(rightDp), dpToPx(bottomDp))
         }
@@ -348,8 +306,17 @@ class XLABPlayerButton(
     }
     
     companion object {
+        // 색상 상수들
+        private val BUTTON_COLORS = mapOf(
+            ButtonType.PRIMARY to Pair("#2196F3", "#1976D2"),
+            ButtonType.SUCCESS to Pair("#4CAF50", "#388E3C"),
+            ButtonType.WARNING to Pair("#FF9800", "#F57C00"),
+            ButtonType.DANGER to Pair("#F44336", "#D32F2F"),
+            ButtonType.SECONDARY to Pair("#9E9E9E", "#757575")
+        )
+        
         /**
-         * 빠른 버튼 생성 팩토리 메서드
+         * 정적 팩토리 메서드
          */
         fun create(
             context: Context,
