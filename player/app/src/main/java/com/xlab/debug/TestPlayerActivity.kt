@@ -132,6 +132,7 @@ class TestPlayerActivity : AppCompatActivity() {
                     runOnUiThread {
                         updateStatus("오류: $error")
                         updateButtonStates()
+                        
                         Toast.makeText(this@TestPlayerActivity, "오류: $error", Toast.LENGTH_LONG).show()
                     }
                 }
@@ -184,6 +185,8 @@ class TestPlayerActivity : AppCompatActivity() {
         disconnectButton.setOnClickListener {
             disconnectStream()
         }
+        
+
         
         // 초기 버튼 상태 설정
         updateButtonStates()
@@ -285,6 +288,8 @@ class TestPlayerActivity : AppCompatActivity() {
         Log.d(TAG, "상태 업데이트: $status")
     }
     
+
+
     /**
      * 버튼 상태 업데이트
      */
