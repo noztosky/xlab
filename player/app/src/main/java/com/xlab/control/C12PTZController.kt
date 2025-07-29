@@ -5,6 +5,7 @@ import kotlinx.coroutines.*
 import java.net.*
 import java.io.IOException
 import android.util.Base64
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * C12 카메라 PTZ 제어 전용 클래스
@@ -31,6 +32,7 @@ class C12PTZController {
     
     // 카메라 연결 설정
     private var cameraHost: String? = null
+    private var cameraInetAddress: InetAddress? = null // IP 주소 캐싱
     private var ptzPort: Int = 5000
     private var username: String = DEFAULT_USERNAME
     private var password: String = DEFAULT_PASSWORD
@@ -42,6 +44,10 @@ class C12PTZController {
     private var currentPan: Float = 0.0f
     private var currentTilt: Float = 0.0f
     private var currentZoom: Float = 1.0f
+    
+    // PTZ 명령 순차 처리를 위한 변수
+    private var isProcessingCommand = false
+    private val commandQueue = mutableListOf<() -> Unit>()
     
     // 콜백 인터페이스들
     interface PTZMoveCallback {
@@ -114,6 +120,10 @@ class C12PTZController {
             val uri = URI(baseUrl)
             this.cameraHost = uri.host
             this.ptzPort = if (uri.port != -1) uri.port else 5000
+            
+            // IP 주소 미리 캐싱 (성능 최적화)
+            this.cameraInetAddress = InetAddress.getByName(uri.host)
+            
         } catch (e: Exception) {
             Log.w(TAG, "URL 파싱 실패, 기본값 사용: ${e.message}")
         }
@@ -234,7 +244,6 @@ class C12PTZController {
         
         executePTZCommand("pan", clampedAngle) { success, message ->
             if (success) {
-                currentPan = clampedAngle
                 callback?.onSuccess("팬 각도 $clampedAngle° 설정 완료")
             } else {
                 callback?.onError("팬 설정 실패: $message")
@@ -256,7 +265,6 @@ class C12PTZController {
         
         executePTZCommand("tilt", clampedAngle) { success, message ->
             if (success) {
-                currentTilt = clampedAngle
                 callback?.onSuccess("틸트 각도 $clampedAngle° 설정 완료")
             } else {
                 callback?.onError("틸트 설정 실패: $message")
@@ -319,8 +327,10 @@ class C12PTZController {
                 
                 withContext(Dispatchers.Main) {
                     if (panSuccess && tiltSuccess) {
-                        currentPan = clampedPan
-                        currentTilt = clampedTilt
+                        synchronized(this@C12PTZController) {
+                            currentPan = clampedPan
+                            currentTilt = clampedTilt
+                        }
                         callback?.onSuccess("팬 ${clampedPan}°, 틸트 ${clampedTilt}° 설정 완료")
                         Log.d(TAG, "팬/틸트 동시 설정 성공: pan=$clampedPan, tilt=$clampedTilt")
                     } else {
@@ -339,41 +349,156 @@ class C12PTZController {
     }
     
     /**
-     * 상대적 이동 (현재 위치에서 증감)
+     * PTZ 명령 순차 처리
+     */
+    private fun executeCommandSequentially(command: () -> Unit) {
+        synchronized(this) {
+            commandQueue.add(command)
+            if (!isProcessingCommand) {
+                processNextCommand()
+            }
+        }
+    }
+    
+    private fun processNextCommand() {
+        synchronized(this) {
+            if (commandQueue.isEmpty()) {
+                isProcessingCommand = false
+                return
+            }
+            
+            isProcessingCommand = true
+            val command = commandQueue.removeAt(0)
+            command()
+        }
+    }
+    
+    private fun onCommandCompleted() {
+        CoroutineScope(Dispatchers.IO).launch {
+            delay(10) // 명령 간 최소 지연 (50ms → 10ms)
+            processNextCommand()
+        }
+    }
+
+    /**
+     * 상대적 이동 (현재 위치에서 증감) - 순차 처리
      * @param deltaPan 팬 증감값
      * @param deltaTilt 틸트 증감값
      * @param callback 결과 콜백
      */
     fun moveRelative(deltaPan: Float, deltaTilt: Float, callback: PTZMoveCallback? = null) {
-        val newPan = currentPan + deltaPan
-        val newTilt = currentTilt + deltaTilt
-        setPanTilt(newPan, newTilt, callback)
+        executeCommandSequentially {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    // 현재 위치 기준 계산
+                    val newPan = currentPan - deltaPan
+                    val newTilt = currentTilt + deltaTilt
+
+                    Log.d(TAG, "상대 이동: 델타(${deltaPan}, ${deltaTilt}) -> 새 위치(${newPan}, ${newTilt})")
+
+                    // 성공 시 위치 업데이트하는 콜백
+                    val updateCallback = object : PTZMoveCallback {
+                        override fun onSuccess(message: String) {
+                            synchronized(this@C12PTZController) {
+                                currentPan = newPan
+                                currentTilt = newTilt
+                            }
+                            CoroutineScope(Dispatchers.Main).launch {
+                                callback?.onSuccess(message)
+                            }
+                            onCommandCompleted() // 다음 명령 처리
+                        }
+                        
+                        override fun onError(error: String) {
+                            CoroutineScope(Dispatchers.Main).launch {
+                                callback?.onError(error)
+                            }
+                            onCommandCompleted() // 다음 명령 처리
+                        }
+                    }
+
+                    // 축별 개별 제어
+                    when {
+                        deltaPan == 0f && deltaTilt != 0f -> {
+                            Log.d(TAG, "틸트만 제어: ${newTilt}°")
+                            setTilt(newTilt, updateCallback)
+                        }
+                        deltaTilt == 0f && deltaPan != 0f -> {
+                            Log.d(TAG, "팬만 제어: ${newPan}°")
+                            setPan(newPan, updateCallback)
+                        }
+                        deltaPan != 0f && deltaTilt != 0f -> {
+                            Log.d(TAG, "팬/틸트 동시 제어: (${newPan}°, ${newTilt}°)")
+                            setPanTilt(newPan, newTilt, updateCallback)
+                        }
+                        else -> {
+                            Log.d(TAG, "이동 없음")
+                            CoroutineScope(Dispatchers.Main).launch {
+                                callback?.onSuccess("이동 없음")
+                            }
+                            onCommandCompleted()
+                        }
+                    }
+                    
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        val errorMsg = "상대 이동 중 오류: ${e.message}"
+                        callback?.onError(errorMsg)
+                        Log.e(TAG, errorMsg, e)
+                    }
+                    onCommandCompleted()
+                }
+            }
+        }
     }
     
     /**
-     * 홈 포지션으로 이동 (0, 0, 1배줌)
+     * 홈 포지션으로 이동 (0, 0, 1배줌) - 비동기 병렬 처리
      * @param callback 결과 콜백
      */
     fun moveToHome(callback: PTZMoveCallback? = null) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                // 먼저 팬/틸트를 0으로
-                setPanTilt(0.0f, 0.0f, object : PTZMoveCallback {
-                    override fun onSuccess(message: String) {
-                        // 그 다음 줌을 1배로
-                        setZoom(1.0f, object : PTZMoveCallback {
+                // 팬/틸트와 줌을 병렬로 실행
+                val panTiltDeferred = async {
+                    suspendCoroutine<Boolean> { continuation ->
+                        setPanTilt(0.0f, 0.0f, object : PTZMoveCallback {
                             override fun onSuccess(message: String) {
-                                callback?.onSuccess("홈 포지션 이동 완료")
+                                continuation.resumeWith(Result.success(true))
                             }
                             override fun onError(error: String) {
-                                callback?.onError("줌 초기화 실패")
+                                continuation.resumeWith(Result.success(false))
                             }
                         })
                     }
-                    override fun onError(error: String) {
-                        callback?.onError("팬/틸트 초기화 실패")
+                }
+                
+                val zoomDeferred = async {
+                    suspendCoroutine<Boolean> { continuation ->
+                        setZoom(1.0f, object : PTZMoveCallback {
+                            override fun onSuccess(message: String) {
+                                continuation.resumeWith(Result.success(true))
+                            }
+                            override fun onError(error: String) {
+                                continuation.resumeWith(Result.success(false))
+                            }
+                        })
                     }
-                })
+                }
+                
+                // 두 작업 모두 완료될 때까지 대기
+                val panTiltResult = panTiltDeferred.await()
+                val zoomResult = zoomDeferred.await()
+                
+                withContext(Dispatchers.Main) {
+                    if (panTiltResult && zoomResult) {
+                        callback?.onSuccess("홈 포지션 이동 완료")
+                    } else if (!panTiltResult) {
+                        callback?.onError("팬/틸트 초기화 실패")
+                    } else {
+                        callback?.onError("줌 초기화 실패")
+                    }
+                }
                 
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -570,45 +695,29 @@ class C12PTZController {
     }
     
     /**
-     * UDP 명령 전송 (내부 메서드)
+     * UDP 명령 전송 (내부 메서드) - 최적화 버전
      */
     private fun sendUDPCommand(command: String): Boolean {
         return try {
-            if (udpSocket == null || cameraHost == null) {
-                Log.w(TAG, "UDP 소켓 또는 호스트가 설정되지 않음")
+            if (udpSocket == null || cameraInetAddress == null) {
+                Log.w(TAG, "UDP 소켓 또는 주소가 설정되지 않음")
                 return false
             }
             
-            // UDP 패킷 생성 및 전송
+            // UDP 패킷 생성 및 전송 (캐싱된 IP 주소 사용)
             val commandBytes = command.toByteArray()
             val packet = DatagramPacket(
                 commandBytes,
                 commandBytes.size,
-                InetAddress.getByName(cameraHost),
+                cameraInetAddress,
                 ptzPort
             )
             
             udpSocket?.send(packet)
             Log.d(TAG, "UDP 명령 전송: $command -> $cameraHost:$ptzPort")
             
-            // 응답 대기 (선택적)
-            try {
-                val responseBuffer = ByteArray(256)
-                val responsePacket = DatagramPacket(responseBuffer, responseBuffer.size)
-                udpSocket?.soTimeout = 1000  // 1초 타임아웃
-                udpSocket?.receive(responsePacket)
-                
-                val response = String(responsePacket.data, 0, responsePacket.length)
-                Log.d(TAG, "UDP 응답: $response")
-                
-                // 응답 분석 (C12 카메라 프로토콜에 맞게 수정)
-                return response.contains("OK") || response.isNotEmpty()
-                
-            } catch (e: SocketTimeoutException) {
-                // 응답 타임아웃은 정상으로 간주 (많은 카메라가 ACK를 보내지 않음)
-                Log.d(TAG, "UDP 명령 전송 완료 (응답 없음)")
-                return true
-            }
+            // C12 카메라는 응답하지 않으므로 송신 후 즉시 성공 반환
+            return true
             
         } catch (e: Exception) {
             Log.e(TAG, "UDP 명령 전송 실패: ${e.message}", e)

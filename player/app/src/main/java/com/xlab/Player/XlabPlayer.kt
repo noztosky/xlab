@@ -6,12 +6,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
-import android.util.Log
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.RelativeLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleObserver
 import androidx.lifecycle.OnLifecycleEvent
@@ -20,12 +19,9 @@ import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
+import kotlin.math.min
 
 class XLABPlayer(private val context: Context) : LifecycleObserver {
-    companion object {
-        private const val TAG = "XLABPlayer"
-    }
-
     private var libVLC: LibVLC? = null
     private var mediaPlayer: MediaPlayer? = null
     private var media: Media? = null
@@ -48,6 +44,14 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private var configurationReceiver: BroadcastReceiver? = null
     private var isReceiverRegistered = false
 
+    // PTZ 제어 관련
+    private var ptzContainer: FrameLayout? = null
+    private var isPtzVisible = false
+    private var currentCameraId = 1
+    private var currentCameraController: CameraController? = null
+    private var currentCameraInfo: CameraInfo? = null
+    private var ptzController: C12PTZController? = null // C12 전용 컨트롤러
+
     interface PlayerCallback {
         fun onPlayerReady()
         fun onPlayerConnected()
@@ -56,165 +60,368 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         fun onPlayerPaused()
         fun onPlayerError(error: String)
         fun onVideoSizeChanged(width: Int, height: Int)
+        fun onPtzCommand(command: String, success: Boolean)
     }
     private var playerCallback: PlayerCallback? = null
-    
-    // 자동 라이프사이클 관리
     private var isLifecycleRegistered = false
-    
-    // 버튼 관리
     private var buttonContainer: LinearLayout? = null
     private val playerButtons = mutableListOf<XLABPlayerButton>()
     
     init {
-        setupLifecycle()
-        setupConfigurationChangeListener()
-    }
-
-    private fun setupLifecycle() {
         try {
             ProcessLifecycleOwner.get().lifecycle.addObserver(this)
             isLifecycleRegistered = true
-        } catch (e: Exception) {
-            // 라이프사이클 등록 실패 (무시)
-        }
-    }
-
-    private fun setupConfigurationChangeListener() {
+        } catch (e: Exception) { }
+        
         configurationReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 if (intent?.action == Intent.ACTION_CONFIGURATION_CHANGED) {
-                    handleConfigurationChange()
+                    videoLayout?.post {
+                        if (isFullscreen) activity?.let { adjustVideoScaleForFullscreen(videoLayout!!, it) }
+                        else setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                        updatePtzPosition()
+                    }
                 }
             }
         }
     }
 
-    private fun handleConfigurationChange() {
-        videoLayout?.post {
-            if (isFullscreen) {
-                activity?.let { adjustVideoScaleForFullscreen(videoLayout!!, it) }
-            } else {
-                setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+    /**
+     * 카메라 서버 설정 (카메라 타입 선택 가능)
+     * @param cameraType 카메라 타입 ("c12", "hikvision", "axis" 등)
+     * @param serverUrl 카메라 서버 URL (예: "http://192.168.144.108:5000")
+     * @param cameraId 카메라 ID (기본값: 1)
+     * @param username 사용자명 (기본값: "admin")
+     * @param password 비밀번호 (기본값: "")
+     */
+    fun setCameraServer(
+        cameraType: String = "c12", 
+        serverUrl: String, 
+        cameraId: Int = 1,
+        username: String = "admin",
+        password: String = ""
+    ) {
+        this.currentCameraId = cameraId
+        
+        // 카메라 타입에 따른 컨트롤러 생성
+        when (cameraType.lowercase()) {
+            "c12" -> {
+                val c12Controller = C12PTZController().apply {
+                    configureWithUrl(serverUrl, username, password)
+                    connect(object : C12PTZController.ConnectionCallback {
+                        override fun onSuccess(message: String) {
+                            android.util.Log.d("XLABPlayer", "C12 PTZ 연결 성공: $message")
+                        }
+                        override fun onError(error: String) {
+                            android.util.Log.w("XLABPlayer", "C12 PTZ 연결 실패: $error")
+                        }
+                    })
+                }
+                currentCameraController = null // C12는 별도 처리
+                currentCameraInfo = CameraInfo(
+                    id = "c12_ptz",
+                    name = "C12 PTZ Camera",
+                    manufacturer = "C12",
+                    model = "PTZ-001",
+                    capabilities = listOf(
+                        CameraCapability.PTZ_CONTROL,
+                        CameraCapability.ZOOM_CONTROL,
+                        CameraCapability.PRESET_POSITIONS
+                    ),
+                    defaultSettings = CameraConnectionSettings(serverUrl, username, password)
+                )
+                // C12 전용 컨트롤러 저장 (기존 방식 유지)
+                ptzController = c12Controller
+            }
+            else -> {
+                android.util.Log.w("XLABPlayer", "지원되지 않는 카메라 타입: $cameraType")
+                return
+            }
+        }
+        
+        android.util.Log.d("XLABPlayer", "카메라 설정 완료: $cameraType - $serverUrl")
+    }
+
+    /**
+     * 기존 방식 호환성 유지 (C12 전용)
+     */
+    @Deprecated("setCameraServer를 사용하세요", ReplaceWith("setCameraServer(\"c12\", serverUrl, cameraId)"))
+    fun setPtzServer(serverUrl: String, cameraId: Int = 1) {
+        setCameraServer("c12", serverUrl, cameraId)
+    }
+
+    /**
+     * PTZ 컨트롤 표시/숨김 토글
+     */
+    fun togglePtzControl() {
+        if (isPtzVisible) hidePtzControl() else showPtzControl()
+    }
+
+    /**
+     * PTZ 컨트롤 표시
+     */
+    fun showPtzControl() {
+        if (ptzContainer != null || parentViewGroup == null) return
+        
+        parentViewGroup?.let { parent ->
+            if (parent is FrameLayout) {
+                createPtzControl()
+                isPtzVisible = true
             }
         }
     }
 
+    /**
+     * PTZ 컨트롤 숨김
+     */
+    fun hidePtzControl() {
+        ptzContainer?.let { container ->
+            parentViewGroup?.removeView(container)
+            ptzContainer = null
+            isPtzVisible = false
+        }
+    }
+
+    /**
+     * PTZ 컨트롤 생성 (사각형 형태)
+     */
+    private fun createPtzControl() {
+        val parent = parentViewGroup as? FrameLayout ?: return
+        
+        ptzContainer = FrameLayout(context).apply {
+            // 투명 배경 (클릭해도 사라지지 않음)
+            setBackgroundColor(0x00000000)
+            
+            // PTZ 버튼 컨테이너 (배경 제거)
+            val ptzLayout = RelativeLayout(context).apply {
+                val size = 350 // PTZ 컨트롤 전체 크기
+                layoutParams = FrameLayout.LayoutParams(size, size, Gravity.BOTTOM or Gravity.END).apply {
+                    setMargins(30, 30, 30, 30)
+                }
+                // 배경 제거 (투명하게)
+                setBackgroundColor(0x00000000)
+            }
+            
+            addView(ptzLayout)
+            createPtzButtons(ptzLayout)
+        }
+        
+        parent.addView(ptzContainer, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+    }
+
+    /**
+     * PTZ 버튼들 생성 (사각형 배치)
+     */
+    private fun createPtzButtons(container: RelativeLayout) {
+        val centerX = 175 // 중심 X 좌표
+        val centerY = 175 // 중심 Y 좌표
+        val buttonSize = 80 // 개별 버튼 크기
+        val distance = 120 // 버튼 중심 간 거리 (적당한 간격)
+        
+        val callback = object : C12PTZController.PTZMoveCallback {
+            override fun onSuccess(message: String) {
+                // 팝업 제거 - 빠른 응답을 위해 콜백 생략
+            }
+            
+            override fun onError(error: String) {
+                // 에러만 로그로 기록
+                android.util.Log.w("XLABPlayer", "PTZ 제어 실패: $error")
+            }
+        }
+        
+        // 위쪽 버튼 (UP) - 틸트 증가
+        createPtzButton(container, "↑", centerX, centerY - distance) {
+            ensurePtzConnection { ptzController?.moveRelative(0f, 10f, callback) }
+        }
+        
+        // 아래쪽 버튼 (DOWN) - 틸트 감소
+        createPtzButton(container, "↓", centerX, centerY + distance) {
+            ensurePtzConnection { ptzController?.moveRelative(0f, -10f, callback) }
+        }
+        
+        // 왼쪽 버튼 (LEFT) - 팬 감소
+        createPtzButton(container, "←", centerX - distance, centerY) {
+            ensurePtzConnection { ptzController?.moveRelative(-10f, 0f, callback) }
+        }
+        
+        // 오른쪽 버튼 (RIGHT) - 팬 증가
+        createPtzButton(container, "→", centerX + distance, centerY) {
+            ensurePtzConnection { ptzController?.moveRelative(10f, 0f, callback) }
+        }
+        
+        // 중앙 홈 버튼 (HOME)
+        createPtzButton(container, "⌂", centerX, centerY) {
+            ensurePtzConnection { ptzController?.moveToHome(callback) }
+        }
+    }
+
+    /**
+     * PTZ 연결 상태 확인 및 자동 연결
+     */
+    private fun ensurePtzConnection(action: () -> Unit) {
+        val controller = ptzController
+        if (controller == null) {
+            android.util.Log.w("XLABPlayer", "PTZ 컨트롤러가 초기화되지 않았습니다")
+            return
+        }
+        
+        if (controller.isConnected()) {
+            action()
+        } else {
+            android.util.Log.d("XLABPlayer", "PTZ 재연결 시도 중...")
+            controller.connect(object : C12PTZController.ConnectionCallback {
+                override fun onSuccess(message: String) {
+                    android.util.Log.d("XLABPlayer", "PTZ 재연결 성공: $message")
+                    action()
+                }
+                override fun onError(error: String) {
+                    android.util.Log.w("XLABPlayer", "PTZ 재연결 실패: $error")
+                }
+            })
+        }
+    }
+
+    /**
+     * 개별 PTZ 버튼 생성 (XLABPlayerButton 사용)
+     */
+    private fun createPtzButton(
+        container: RelativeLayout,
+        text: String,
+        x: Int,
+        y: Int,
+        onClick: () -> Unit
+    ) {
+        val ptzButton = XLABPlayerButton.create(
+            context, 
+            text, 
+            XLABPlayerButton.ButtonType.SECONDARY,
+            onClick
+        ).apply {
+            // PTZ 전용 스타일링
+            setAsPtzButton()
+        }
+        
+        val buttonSize = 80 // 개별 버튼 크기
+        val layoutParams = RelativeLayout.LayoutParams(buttonSize, buttonSize).apply {
+            leftMargin = x - buttonSize / 2
+            topMargin = y - buttonSize / 2
+        }
+        
+        ptzButton.buttonView.layoutParams = layoutParams
+        container.addView(ptzButton.buttonView)
+    }
+
+    /**
+     * PTZ 위치 업데이트 (화면 회전 시)
+     */
+    private fun updatePtzPosition() {
+        if (isPtzVisible) {
+            hidePtzControl()
+            showPtzControl()
+        }
+    }
+
+    /**
+     * 카메라 변경
+     */
+    fun setCameraId(cameraId: Int) {
+        this.currentCameraId = cameraId
+    }
+
+    /**
+     * PTZ 버튼 추가 (메인 컨트롤에)
+     */
+    fun addPtzToggleButton(): XLABPlayerButton {
+        return addButton("PTZ", XLABPlayerButton.ButtonType.SECONDARY) {
+            togglePtzControl()
+        }
+    }
+
     fun initialize(parent: ViewGroup): Boolean {
-        try {
+        return try {
             this.parentViewGroup = parent
             
             if (context is Activity) {
-                this.activity = context as Activity
-                registerConfigurationChangeReceiver()
+                this.activity = context
+                try {
+                    if (!isReceiverRegistered && configurationReceiver != null) {
+                        context.registerReceiver(configurationReceiver, IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED))
+                        isReceiverRegistered = true
+                    }
+                } catch (e: Exception) { }
             }
 
-            // LibVLC 초기화 (안전한 옵션 사용)
-            val options = arrayListOf("--intf=dummy", "--no-audio")
             if (context == null) {
                 playerCallback?.onPlayerError("Context가 null입니다")
                 return false
             }
             
-            libVLC = LibVLC(context, options)
+            libVLC = LibVLC(context, arrayListOf("--intf=dummy", "--network-caching=0", "--no-audio"))
             mediaPlayer = MediaPlayer(libVLC)
 
-            // VideoLayout 초기화
             videoLayout?.let { parent.removeView(it) }
-            videoLayout = VLCVideoLayout(context)
-            parent.addView(videoLayout)
-            
-            setupLayoutChangeListener()
-            mediaPlayer?.attachViews(videoLayout!!, null, true, false)
-            setupEventListeners()
-            
-            isInitialized = true
-            playerCallback?.onPlayerReady()
-            setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
-            return true
-        } catch (e: Exception) {
-            val errorMsg = e.message ?: "알 수 없는 오류 - ${e.javaClass.simpleName}"
-            playerCallback?.onPlayerError("초기화 실패: $errorMsg")
-            return false
-        }
-    }
-
-    private fun registerConfigurationChangeReceiver() {
-        try {
-            if (!isReceiverRegistered && configurationReceiver != null) {
-                context.registerReceiver(configurationReceiver, IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED))
-                isReceiverRegistered = true
-            }
-        } catch (e: Exception) {
-            // 등록 실패 무시
-        }
-    }
-
-    private fun unregisterConfigurationChangeReceiver() {
-        try {
-            if (isReceiverRegistered && configurationReceiver != null) {
-                context.unregisterReceiver(configurationReceiver)
-                isReceiverRegistered = false
-            }
-        } catch (e: Exception) {
-            // 해제 실패 무시
-        }
-    }
-
-    private fun setupLayoutChangeListener() {
-        videoLayout?.addOnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-            val newWidth = right - left
-            val newHeight = bottom - top
-            val oldWidth = oldRight - oldLeft
-            val oldHeight = oldBottom - oldTop
-            
-            if (newWidth != oldWidth || newHeight != oldHeight) {
-                view.post {
-                    if (isFullscreen) {
-                        activity?.let { adjustVideoScaleForFullscreen(view as VLCVideoLayout, it) }
-                    } else {
-                        setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun setupEventListeners() {
-        mediaPlayer?.setEventListener(object : MediaPlayer.EventListener {
-            override fun onEvent(event: MediaPlayer.Event) {
-                when (event.type) {
-                    MediaPlayer.Event.Playing -> {
-                        isPlaying = true
-                        isConnected = true
-                        updateButtonStates()
-                        playerCallback?.onPlayerPlaying()
-                        setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
-                    }
-                    MediaPlayer.Event.Paused -> {
-                        isPlaying = false
-                        updateButtonStates()
-                        playerCallback?.onPlayerPaused()
-                    }
-                    MediaPlayer.Event.Stopped -> {
-                        isPlaying = false
-                        isConnected = false
-                        updateButtonStates()
-                        playerCallback?.onPlayerDisconnected()
-                    }
-                    MediaPlayer.Event.EncounteredError -> {
-                        isPlaying = false
-                        isConnected = false
-                        playerCallback?.onPlayerError("재생 오류")
-                    }
-                    MediaPlayer.Event.Vout -> {
-                        if (event.voutCount > 0) {
-                            setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+            videoLayout = VLCVideoLayout(context).apply { 
+                parent.addView(this)
+                addOnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+                    val newWidth = right - left
+                    val newHeight = bottom - top
+                    val oldWidth = oldRight - oldLeft
+                    val oldHeight = oldBottom - oldTop
+                    
+                    if (newWidth != oldWidth || newHeight != oldHeight) {
+                        view.post {
+                            if (isFullscreen) activity?.let { adjustVideoScaleForFullscreen(view as VLCVideoLayout, it) }
+                            else setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
                         }
                     }
                 }
             }
-        })
+            
+            mediaPlayer?.attachViews(videoLayout!!, null, true, false)
+            mediaPlayer?.setEventListener(object : MediaPlayer.EventListener {
+                override fun onEvent(event: MediaPlayer.Event) {
+                    when (event.type) {
+                        MediaPlayer.Event.Playing -> {
+                            isPlaying = true
+                            isConnected = true
+                            updateButtonStates()
+                            playerCallback?.onPlayerPlaying()
+                            setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                        }
+                        MediaPlayer.Event.Paused -> {
+                            isPlaying = false
+                            updateButtonStates()
+                            playerCallback?.onPlayerPaused()
+                        }
+                        MediaPlayer.Event.Stopped -> {
+                            isPlaying = false
+                            isConnected = false
+                            updateButtonStates()
+                            playerCallback?.onPlayerDisconnected()
+                        }
+                        MediaPlayer.Event.EncounteredError -> {
+                            isPlaying = false
+                            isConnected = false
+                            playerCallback?.onPlayerError("재생 오류")
+                        }
+                        MediaPlayer.Event.Vout -> {
+                            if (event.voutCount > 0) setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                        }
+                    }
+                }
+            })
+            
+            isInitialized = true
+            playerCallback?.onPlayerReady()
+            setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+            true
+        } catch (e: Exception) {
+            playerCallback?.onPlayerError("초기화 실패: ${e.message ?: "알 수 없는 오류 - ${e.javaClass.simpleName}"}")
+            false
+        }
     }
 
     fun connectAndPlay(url: String = "rtsp://192.168.144.108:554/stream=1"): Boolean {
@@ -224,9 +431,10 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 return false
             }
             
-            releaseMedia()
-            media = Media(libVLC, Uri.parse(url))
-            media?.addOption(":network-caching=1000")
+            try { media?.release() } catch (e: Exception) { }
+            media = null
+            
+            media = Media(libVLC, Uri.parse(url)).apply { addOption(":network-caching=1000") }
             mediaPlayer?.media = media
             mediaPlayer?.play()
             
@@ -261,47 +469,40 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
 
     private fun executeAction(condition: Boolean, action: () -> Unit): Boolean {
         return try {
-            if (condition) {
-                action()
-                true
-            } else false
-        } catch (e: Exception) {
-            false
-        }
+            if (condition) { action(); true } else false
+        } catch (e: Exception) { false }
     }
 
     fun disconnect(): Boolean {
         return try {
             stop()
-            releaseMedia()
+            try { media?.release() } catch (e: Exception) { }
+            media = null
             isConnected = false
             currentUrl = ""
             true
-        } catch (e: Exception) {
-            false
-        }
-    }
-
-    private fun releaseMedia() {
-        try {
-            media?.release()
-            media = null
-        } catch (e: Exception) {
-            // 무시
-        }
+        } catch (e: Exception) { false }
     }
 
     fun release() {
         try {
             if (isFullscreen) exitFullscreen()
-            unregisterConfigurationChangeReceiver()
+            hidePtzControl()
+            
+            try {
+                if (isReceiverRegistered && configurationReceiver != null) {
+                    context.unregisterReceiver(configurationReceiver)
+                    isReceiverRegistered = false
+                }
+            } catch (e: Exception) { }
             
             if (isPlaying || isConnected) {
                 mediaPlayer?.stop()
                 Thread.sleep(200)
             }
             
-            releaseMedia()
+            try { media?.release() } catch (e: Exception) { }
+            media = null
             mediaPlayer?.detachViews()
             mediaPlayer?.release()
             mediaPlayer = null
@@ -321,41 +522,29 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             isPlaying = false
             isConnected = false
             currentUrl = ""
-        } catch (e: Exception) {
-            // 무시
-        }
+        } catch (e: Exception) { }
     }
 
     @OnLifecycleEvent(Lifecycle.Event.ON_STOP)
-    fun onAppBackground() {
-        if (isPlaying) pause()
-    }
+    fun onAppBackground() { if (isPlaying) pause() }
     
     @OnLifecycleEvent(Lifecycle.Event.ON_START)
-    fun onAppForeground() {
-        // 필요시 재생 재개 로직 추가 가능
-    }
+    fun onAppForeground() { }
     
     @OnLifecycleEvent(Lifecycle.Event.ON_DESTROY)
-    fun onAppDestroy() {
-        release()
-    }
+    fun onAppDestroy() { release() }
 
-    fun setCallback(callback: PlayerCallback) {
-        this.playerCallback = callback
-    }
+    fun setCallback(callback: PlayerCallback) { this.playerCallback = callback }
 
     fun addButtonContainer(parent: ViewGroup): LinearLayout {
         buttonContainer?.let { parent.removeView(it) }
-        
-        buttonContainer = LinearLayout(context).apply {
+        return LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setPadding(16, 8, 16, 8)
+            buttonContainer = this
+            parent.addView(this)
         }
-        
-        parent.addView(buttonContainer)
-        return buttonContainer!!
     }
     
     fun addButton(
@@ -363,10 +552,10 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         type: XLABPlayerButton.ButtonType = XLABPlayerButton.ButtonType.PRIMARY,
         clickListener: (() -> Unit)? = null
     ): XLABPlayerButton {
-        val button = XLABPlayerButton.create(context, text, type, clickListener)
-        playerButtons.add(button)
-        buttonContainer?.addView(button.buttonView)
-        return button
+        return XLABPlayerButton.create(context, text, type, clickListener).also {
+            playerButtons.add(it)
+            buttonContainer?.addView(it.buttonView)
+        }
     }
     
     fun addButtons(vararg buttonConfigs: Triple<String, XLABPlayerButton.ButtonType, (() -> Unit)?>): List<XLABPlayerButton> {
@@ -385,7 +574,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     
     fun addScalingControlButton(): XLABPlayerButton {
         var currentMode = VideoScaleMode.FIT_WINDOW
-        
         return addButton("맞춤", XLABPlayerButton.ButtonType.SECONDARY) {
             currentMode = when (currentMode) {
                 VideoScaleMode.FIT_WINDOW -> VideoScaleMode.FILL_WINDOW
@@ -452,9 +640,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
     }
     
-    enum class VideoScaleMode {
-        FIT_WINDOW, FILL_WINDOW, ORIGINAL_SIZE, STRETCH
-    }
+    enum class VideoScaleMode { FIT_WINDOW, FILL_WINDOW, ORIGINAL_SIZE, STRETCH }
 
     fun isPlayerReady(): Boolean = isInitialized
     fun isPlayerPlaying(): Boolean = isPlaying
@@ -463,11 +649,11 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
 
     fun toggleFullscreen() {
         if (!isInitialized || videoLayout == null || activity == null) return
-        
         try {
             if (isFullscreen) exitFullscreen() else enterFullscreen()
         } catch (e: Exception) {
-            resetFullscreenState()
+            isFullscreen = false
+            updateFullscreenButtonIcon()
         }
     }
     
@@ -484,11 +670,21 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                         FrameLayout.LayoutParams.WRAP_CONTENT,
                         Gravity.CENTER
                     ))
-                    addFullscreenExitButton()
+                    addView(android.widget.Button(context).apply {
+                        text = "⧉"
+                        textSize = 20f
+                        setTextColor(android.graphics.Color.WHITE)
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        setPadding(16, 16, 16, 16)
+                        setOnClickListener { exitFullscreen() }
+                    }, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.END or Gravity.TOP
+                    ).apply { setMargins(0, 20, 20, 0) })
                 }
                 
-                val decorView = act.window.decorView as ViewGroup
-                decorView.addView(fullscreenContainer, FrameLayout.LayoutParams(
+                (act.window.decorView as ViewGroup).addView(fullscreenContainer, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.MATCH_PARENT
                 ))
@@ -529,11 +725,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
     }
 
-    private fun resetFullscreenState() {
-        isFullscreen = false
-        updateFullscreenButtonIcon()
-    }
-
     private fun updateFullscreenButtonIcon() {
         val icon = if (isFullscreen) "⧉" else "⧈"
         when (val button = fullscreenButton) {
@@ -567,30 +758,15 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             }
         }
         
-        val fallbackBtn = addButton("⧈", XLABPlayerButton.ButtonType.SECONDARY) { toggleFullscreen() }
-        fallbackBtn.setAsTransparentIconButton("⧈")
-        fullscreenButton = fallbackBtn
-        return fallbackBtn
+        return addButton("⧈", XLABPlayerButton.ButtonType.SECONDARY) { toggleFullscreen() }.also {
+            it.setAsTransparentIconButton("⧈")
+            fullscreenButton = it
+        }
     }
     
     private inner class SimpleFullscreenButton(val button: android.widget.Button) {
         fun setAsTransparentIconButton(icon: String) { button.text = icon }
         fun updateIcon() { button.text = if (isFullscreen) "⧉" else "⧈" }
-    }
-    
-    private fun FrameLayout.addFullscreenExitButton() {
-        addView(android.widget.Button(context).apply {
-            text = "⧉"
-            textSize = 20f
-            setTextColor(android.graphics.Color.WHITE)
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            setPadding(16, 16, 16, 16)
-            setOnClickListener { exitFullscreen() }
-        }, FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            Gravity.END or Gravity.TOP
-        ).apply { setMargins(0, 20, 20, 0) })
     }
 
     private fun adjustVideoScaleForFullscreen(layout: VLCVideoLayout, activity: Activity) {

@@ -169,6 +169,35 @@ class XLABPlayerButton(
     }
     
     /**
+     * PTZ 컨트롤 버튼 스타일
+     */
+    fun setAsPtzButton() {
+        buttonView.textSize = 24f // 18f → 24f (큰 버튼에 맞게)
+        buttonView.setPadding(0, 0, 0, 0)
+        buttonView.setTextColor(Color.WHITE)
+        
+        // PTZ 전용 배경 (둥근 모서리, 반투명)
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 40f // 18f → 40f (큰 버튼에 맞게)
+            setColor(Color.parseColor("#80444444"))
+        }
+        
+        // 눌림 효과
+        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 40f // 18f → 40f
+                setColor(Color.parseColor("#80666666"))
+            })
+            addState(intArrayOf(), drawable)
+        }
+        
+        buttonView.background = stateDrawable
+        buttonView.setShadowLayer(3f, 2f, 2f, Color.parseColor("#40000000")) // 그림자도 조금 더 진하게
+    }
+
+    /**
      * 버튼 크기 변경
      */
     fun setSize(widthDp: Int, heightDp: Int) {

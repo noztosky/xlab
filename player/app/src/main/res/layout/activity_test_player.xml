@@ -84,6 +84,15 @@
         android:layout_height="wrap_content"
         android:text="연결 해제"
         android:backgroundTint="#FF4444"
+        android:textColor="#FFFFFF"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/ptz_toggle_button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="PTZ 컨트롤"
+        android:backgroundTint="#9C27B0"
         android:textColor="#FFFFFF" />
 
 </LinearLayout> 
