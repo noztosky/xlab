@@ -198,6 +198,35 @@ class XLABPlayerButton(
     }
 
     /**
+     * 전체화면 버튼 스타일 (PTZ와 동일한 스타일)
+     */
+    fun setAsFullscreenButton(icon: String) {
+        buttonView.text = icon
+        buttonView.textSize = 14f
+        buttonView.setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4))
+        buttonView.setTextColor(Color.WHITE)
+        
+        // PTZ와 동일한 배경 스타일 적용
+        val drawable = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 8f // 둥근 모서리
+            setColor(Color.parseColor("#80444444")) // PTZ와 같은 투명도
+        }
+        
+        val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 8f
+                setColor(Color.parseColor("#80666666"))
+            })
+            addState(intArrayOf(), drawable)
+        }
+        
+        buttonView.background = stateDrawable
+        buttonView.setShadowLayer(3f, 2f, 2f, Color.parseColor("#40000000"))
+    }
+
+    /**
      * 버튼 크기 변경
      */
     fun setSize(widthDp: Int, heightDp: Int) {
@@ -211,9 +240,7 @@ class XLABPlayerButton(
      */
     fun setFrameLayoutMargin(leftDp: Int, topDp: Int, rightDp: Int, bottomDp: Int, gravity: Int) {
         val params = android.widget.FrameLayout.LayoutParams(
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-            gravity
+            dpToPx(30), dpToPx(30), gravity
         ).apply {
             setMargins(dpToPx(leftDp), dpToPx(topDp), dpToPx(rightDp), dpToPx(bottomDp))
         }

@@ -236,27 +236,27 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
         
         // 위쪽 버튼 (UP) - 틸트 증가
-        createPtzButton(container, "↑", centerX, centerY - distance, buttonSize) {
+        createPtzButton(container, "▲", centerX, centerY - distance, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(0f, 10f, callback) }
         }
         
         // 아래쪽 버튼 (DOWN) - 틸트 감소
-        createPtzButton(container, "↓", centerX, centerY + distance, buttonSize) {
+        createPtzButton(container, "▼", centerX, centerY + distance, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(0f, -10f, callback) }
         }
         
         // 왼쪽 버튼 (LEFT) - 팬 감소
-        createPtzButton(container, "←", centerX - distance, centerY, buttonSize) {
+        createPtzButton(container, "◀", centerX - distance, centerY, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(-10f, 0f, callback) }
         }
         
         // 오른쪽 버튼 (RIGHT) - 팬 증가
-        createPtzButton(container, "→", centerX + distance, centerY, buttonSize) {
+        createPtzButton(container, "▶", centerX + distance, centerY, buttonSize) {
             ensurePtzConnection { ptzController?.moveRelative(10f, 0f, callback) }
         }
         
         // 중앙 홈 버튼 (HOME)
-        createPtzButton(container, "⌂", centerX, centerY, buttonSize) {
+        createPtzButton(container, "■", centerX, centerY, buttonSize) {
             ensurePtzConnection { ptzController?.moveToHome(callback) }
         }
     }
@@ -663,6 +663,16 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private fun enterFullscreen() {
         activity?.let { act ->
             videoLayout?.let { layout ->
+                // 시스템 UI 숨기기 (상태바, 네비게이션 바)
+                act.window.decorView.systemUiVisibility = (
+                    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                )
+                
                 originalLayoutParams = layout.layoutParams
                 parentViewGroup?.removeView(layout)
                 
@@ -715,6 +725,9 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     
     private fun exitFullscreen() {
         activity?.let { act ->
+            // 시스템 UI 복원
+            act.window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+            
             fullscreenContainer?.let { container ->
                 videoLayout?.let { layout ->
                     container.removeView(layout)
@@ -755,7 +768,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private fun updateFullscreenButtonIcon() {
         val icon = if (isFullscreen) "⧉" else "⧈"
         when (val button = fullscreenButton) {
-            is XLABPlayerButton -> button.setAsTransparentIconButton(icon)
+            is XLABPlayerButton -> button.setAsFullscreenButton(icon)
             is SimpleFullscreenButton -> button.updateIcon()
         }
     }
@@ -764,55 +777,28 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     
     fun addFullscreenButton(): XLABPlayerButton {
         parentViewGroup?.let { parent ->
-            // FrameLayout인 경우 직접 android.widget.Button 생성
-            val button = android.widget.Button(parent.context).apply {
-                text = "⧈"
-                textSize = 14f
-                setTextColor(android.graphics.Color.WHITE)
-                setPadding(4, 4, 4, 4)
-                setOnClickListener { toggleFullscreen() }
-                
-                // PTZ 버튼과 동일한 스타일 적용 (둥근 모서리, 50% 투명도)
-                val drawable = android.graphics.drawable.GradientDrawable().apply {
-                    shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                    cornerRadius = 8f // 둥근 모서리
-                    setColor(android.graphics.Color.parseColor("#80444444")) // PTZ와 같은 투명도
-                }
-                
-                val stateDrawable = android.graphics.drawable.StateListDrawable().apply {
-                    addState(intArrayOf(android.R.attr.state_pressed), android.graphics.drawable.GradientDrawable().apply {
-                        shape = android.graphics.drawable.GradientDrawable.RECTANGLE
-                        cornerRadius = 8f
-                        setColor(android.graphics.Color.parseColor("#80666666"))
-                    })
-                    addState(intArrayOf(), drawable)
-                }
-                
-                background = stateDrawable
-                setShadowLayer(3f, 2f, 2f, android.graphics.Color.parseColor("#40000000"))
+            // XLABPlayerButton을 사용하여 간단하게 생성
+            val xlabButton = XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY) {
+                toggleFullscreen()
             }
             
-            // FrameLayout.LayoutParams를 직접 설정 (정사각형 크기)
-            val buttonSize = 80 // 80px 정사각형
-            val layoutParams = FrameLayout.LayoutParams(
-                buttonSize,
-                buttonSize,
-                android.view.Gravity.END or android.view.Gravity.TOP
-            ).apply { 
-                setMargins(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0) 
-            }
-            button.layoutParams = layoutParams
+            // 전체화면 버튼 스타일 적용
+            xlabButton.setAsFullscreenButton("⧈")
             
-            parent.addView(button)
-            fullscreenButton = SimpleFullscreenButton(button)
+            // FrameLayout용 마진과 크기 설정
+            xlabButton.setFrameLayoutMargin(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0, 
+                android.view.Gravity.END or android.view.Gravity.TOP)
+            // setSize 호출을 제거 - setFrameLayoutMargin이 이미 LayoutParams를 설정하므로
             
-            // 더미 XLABPlayerButton 반환 (호환성을 위해)
-            return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY)
+            parent.addView(xlabButton.buttonView)
+            fullscreenButton = xlabButton
+            
+            return xlabButton
         }
         
         // parentViewGroup이 null인 경우 기본 방식 사용 (호환성)
         return XLABPlayerButton.create(context, "⧈", XLABPlayerButton.ButtonType.SECONDARY).also {
-            it.setAsTransparentIconButton("⧈")
+            it.setAsFullscreenButton("⧈")
             fullscreenButton = it
         }
     }
