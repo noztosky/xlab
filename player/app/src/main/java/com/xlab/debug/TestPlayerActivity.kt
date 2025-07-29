@@ -28,7 +28,7 @@ class TestPlayerActivity : AppCompatActivity() {
     private lateinit var pauseButton: Button
     private lateinit var stopButton: Button
     private lateinit var disconnectButton: Button
-    private lateinit var ptzToggleButton: Button
+
     
     // XLABPlayer 인스턴스
     private var xlabPlayer: XLABPlayer? = null
@@ -53,7 +53,7 @@ class TestPlayerActivity : AppCompatActivity() {
         pauseButton = findViewById(R.id.pause_button)
         stopButton = findViewById(R.id.stop_button)
         disconnectButton = findViewById(R.id.disconnect_button)
-        ptzToggleButton = findViewById(R.id.ptz_toggle_button)
+
         
         // 비디오 컨테이너를 16:9 비율로 설정
         setupVideoContainerAspectRatio()
@@ -166,6 +166,9 @@ class TestPlayerActivity : AppCompatActivity() {
                 // 카메라 서버 설정 (C12 카메라)
                 xlabPlayer?.setCameraServer("c12", "http://192.168.144.108:5000", 1)
                 
+                // PTZ 컨트롤을 기본적으로 표시
+                xlabPlayer?.showPtzControl()
+                
                 updateStatus("플레이어 준비 완료")
             }
             
@@ -199,12 +202,6 @@ class TestPlayerActivity : AppCompatActivity() {
         disconnectButton.setOnClickListener {
             disconnectStream()
         }
-        
-        ptzToggleButton.setOnClickListener {
-            togglePtz()
-        }
-        
-
         
         // 초기 버튼 상태 설정
         updateButtonStates()
@@ -298,18 +295,7 @@ class TestPlayerActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * PTZ 토글 버튼 클릭 시 호출되는 함수
-     */
-    private fun togglePtz() {
-        try {
-            xlabPlayer?.togglePtzControl()
-            Toast.makeText(this, "PTZ 컨트롤 토글", Toast.LENGTH_SHORT).show()
-        } catch (e: Exception) {
-            Log.e(TAG, "PTZ 토글 실패", e)
-            Toast.makeText(this, "PTZ 토글 실패: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
-    }
+
     
     /**
      * 상태 텍스트 업데이트
@@ -334,7 +320,7 @@ class TestPlayerActivity : AppCompatActivity() {
         pauseButton.isEnabled = isConnected && isPlaying
         stopButton.isEnabled = isConnected
         disconnectButton.isEnabled = isConnected
-        ptzToggleButton.isEnabled = isReady // isConnected → isReady로 변경
+
         
         Log.d(TAG, "버튼 상태 업데이트 - 준비: $isReady, 연결: $isConnected, 재생: $isPlaying")
     }

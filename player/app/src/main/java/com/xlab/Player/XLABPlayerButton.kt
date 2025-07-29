@@ -172,7 +172,7 @@ class XLABPlayerButton(
      * PTZ 컨트롤 버튼 스타일
      */
     fun setAsPtzButton() {
-        buttonView.textSize = 24f // 18f → 24f (큰 버튼에 맞게)
+        buttonView.textSize = 20f // 24f에서 10% 감소 (24f * 0.9 = 21.6f ≈ 22f)
         buttonView.setPadding(0, 0, 0, 0)
         buttonView.setTextColor(Color.WHITE)
         
