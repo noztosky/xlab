@@ -301,6 +301,16 @@ class DualPlayerActivity : AppCompatActivity() {
                 Log.d(TAG, "플레이어2가 전체화면으로 전환됨")
             }
         }
+
+        // 시스템 UI 숨기기 (상태바, 네비게이션 바)
+        window.decorView.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        )
         
         Toast.makeText(this, "$playerName 전체화면", Toast.LENGTH_SHORT).show()
     }
@@ -309,6 +319,9 @@ class DualPlayerActivity : AppCompatActivity() {
      * 전체화면 종료 처리
      */
     private fun handleFullscreenExited(playerName: String, cameraId: Int) {
+        // 시스템 UI 복원
+        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+        
         // 루트 레이아웃의 padding 복원
         rootLayout.setPadding(
             originalRootPadding[0], // left
@@ -338,6 +351,22 @@ class DualPlayerActivity : AppCompatActivity() {
         
         currentFullscreenPlayer = 0
         Toast.makeText(this, "$playerName 원본 크기", Toast.LENGTH_SHORT).show()
+    }
+    
+    /**
+     * 백 버튼 처리 - 전체화면에서는 전체화면 종료
+     */
+    override fun onBackPressed() {
+        if (currentFullscreenPlayer != 0) {
+            // 전체화면 상태에서는 전체화면 종료
+            when (currentFullscreenPlayer) {
+                1 -> xlabPlayer1?.toggleFullscreen()
+                2 -> xlabPlayer2?.toggleFullscreen()
+            }
+        } else {
+            // 일반 상태에서는 기본 백 버튼 동작
+            super.onBackPressed()
+        }
     }
     
     override fun onDestroy() {

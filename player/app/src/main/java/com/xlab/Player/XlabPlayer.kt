@@ -55,6 +55,9 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private var currentCameraController: CameraController? = null
     private var currentCameraInfo: CameraInfo? = null
     private var ptzController: C12PTZController? = null // C12 전용 컨트롤러
+    
+    // PTZ 조종 속도 설정 (기본값: 10.0f, 범위: 0.5f ~ 10.0f)
+    private var ptzMoveSpeed: Float = 10.0f
 
     interface PlayerCallback {
         fun onPlayerReady()
@@ -245,22 +248,22 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         
         // 위쪽 버튼 (UP) - 틸트 증가
         createPtzButton(container, "▲", centerX, centerY - distance, buttonSize) {
-            ensurePtzConnection { ptzController?.moveRelative(0f, 10f, callback) }
+            ensurePtzConnection { ptzController?.moveRelative(0f, ptzMoveSpeed, callback) }
         }
         
         // 아래쪽 버튼 (DOWN) - 틸트 감소
         createPtzButton(container, "▼", centerX, centerY + distance, buttonSize) {
-            ensurePtzConnection { ptzController?.moveRelative(0f, -10f, callback) }
+            ensurePtzConnection { ptzController?.moveRelative(0f, -ptzMoveSpeed, callback) }
         }
         
         // 왼쪽 버튼 (LEFT) - 팬 감소
         createPtzButton(container, "◀", centerX - distance, centerY, buttonSize) {
-            ensurePtzConnection { ptzController?.moveRelative(-10f, 0f, callback) }
+            ensurePtzConnection { ptzController?.moveRelative(-ptzMoveSpeed, 0f, callback) }
         }
         
         // 오른쪽 버튼 (RIGHT) - 팬 증가
         createPtzButton(container, "▶", centerX + distance, centerY, buttonSize) {
-            ensurePtzConnection { ptzController?.moveRelative(10f, 0f, callback) }
+            ensurePtzConnection { ptzController?.moveRelative(ptzMoveSpeed, 0f, callback) }
         }
         
         // 중앙 홈 버튼 (HOME)
@@ -341,6 +344,8 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     fun setCameraId(cameraId: Int) {
         this.currentCameraId = cameraId
     }
+    
+
 
     /**
      * PTZ 버튼 추가 (메인 컨트롤에)
@@ -350,6 +355,8 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             togglePtzControl()
         }
     }
+    
+
 
     fun initialize(parent: ViewGroup): Boolean {
         return try {
@@ -372,7 +379,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             
             libVLC = LibVLC(context, arrayListOf(
                 "--intf=dummy",
-                "--network-caching=300",  // 0에서 300으로 증가 (안정성)
+                "--network-caching=0",    // 비디오 속도 최적화: 네트워크 캐싱 최소화
                 "--no-audio",
                 "--rtsp-caching=0",
                 "--drop-late-frames",
@@ -382,9 +389,12 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 "--codec=avcodec",
                 "--avcodec-hw=any",
                 "--no-stats",
-                "--no-osd",
-                //"--rtsp-tcp",
-                "--avcodec-threads=0"
+                "--no-osd",                
+                "--avcodec-threads=0",
+                "--file-caching=0",       // 파일 캐싱 최소화
+                "--sout-mux-caching=0"    // 출력 캐싱 최소화
+
+
             ))
             mediaPlayer = MediaPlayer(libVLC)
 
@@ -476,15 +486,50 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             media = null
             
             media = Media(libVLC, Uri.parse(url)).apply { 
-                addOption(":network-caching=0")  // 안정적인 캐싱 값
+                // 비디오 속도 최적화: 캐싱 완전 제거 - 즉시 재생
+                addOption(":network-caching=0")
+                addOption(":file-caching=0") 
+                addOption(":live-caching=0")
+                addOption(":rtsp-caching=0")
+                addOption(":sout-mux-caching=0")
+
+                // 오디오 제거
                 addOption(":no-audio")
-                 addOption(":rtsp-caching=0")
-                 addOption(":live-caching=0")
-                 addOption(":clock-jitter=0")
-                 addOption(":clock-synchro=0")
-                // addOption(":rtsp-tcp")
-                 addOption(":avcodec-fast")
-                 addOption(":avcodec-skiploopfilter=all")
+
+                // 즉시 재생 시작
+                addOption(":start-time=0")
+                addOption(":run-time=0") 
+                addOption(":no-video-title-show")
+                addOption(":no-snapshot-preview")
+
+                // 최소 버퍼링으로 빠른 재생
+                addOption(":avcodec-fast")
+                addOption(":avcodec-skiploopfilter=all")
+                addOption(":avcodec-skip-frame=0")     // 프레임 스킵 최소화
+                addOption(":avcodec-threads=1")
+
+                // 동기화 무시하고 빠른 재생
+                addOption(":no-audio-sync") 
+                addOption(":clock-jitter=0")
+                addOption(":fps-trust")
+
+                // RTSP 최적화
+                addOption(":rtsp-frame-buffer-size=0")
+
+                // 즉시 디스플레이
+                addOption(":vout-display-delay=0")
+                addOption(":audio-delay=0")
+                addOption(":drop-late-frames")          // 지연된 프레임만 드랍
+
+
+
+
+
+
+
+
+
+
             }
             mediaPlayer?.media = media
             mediaPlayer?.play()
@@ -768,21 +813,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     private fun enterFullscreen() {
         activity?.let { act ->
             videoLayout?.let { layout ->
-                // 시스템 UI 숨기기 (상태바, 네비게이션 바)
-                act.window.decorView.systemUiVisibility = (
-                    android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
-                    android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                    android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                )
-                
-                // VandiPlay 방식: 레이아웃 파라미터만 변경 (영상 끊김 없음)
-                fullscreenLayoutParams?.let { params ->
-                    layout.layoutParams = params
-                }
-                
                 // UI 요소들 숨기기
                 hideUIElements()
                 
