@@ -135,6 +135,14 @@ class TestPlayerActivity : AppCompatActivity() {
                 override fun onPtzCommand(command: String, success: Boolean) {
                     // PTZ 명령 처리 (필요시 Toast 표시)
                 }
+                
+                override fun onFullscreenEntered() {
+                    // 전체화면 진입 처리 (TestPlayerActivity에서는 별도 처리 불필요)
+                }
+                
+                override fun onFullscreenExited() {
+                    // 전체화면 종료 처리 (TestPlayerActivity에서는 별도 처리 불필요)
+                }
             })
             
             // 플레이어 초기화

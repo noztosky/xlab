@@ -43,8 +43,8 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
     
     // UI 컴포넌트들
     private var originalLayoutParams: ViewGroup.LayoutParams? = null
-    private var fullscreenButton: Any? = null
-    private var fullscreenContainer: FrameLayout? = null
+    private var fullscreenLayoutParams: ViewGroup.LayoutParams? = null
+    private var fullscreenButton: XLABPlayerButton? = null
     private var recordButton: XLABPlayerButton? = null
     private var captureButton: XLABPlayerButton? = null
     private var ptzContainer: FrameLayout? = null
@@ -65,6 +65,8 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         fun onPlayerError(error: String)
         fun onVideoSizeChanged(width: Int, height: Int)
         fun onPtzCommand(command: String, success: Boolean)
+        fun onFullscreenEntered()
+        fun onFullscreenExited()
     }
     private var playerCallback: PlayerCallback? = null
     private var isLifecycleRegistered = false
@@ -389,6 +391,21 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             videoLayout?.let { parent.removeView(it) }
             videoLayout = VLCVideoLayout(context).apply { 
                 parent.addView(this)
+                
+                // 원본 및 전체화면 레이아웃 파라미터 설정
+                originalLayoutParams = this.layoutParams
+                fullscreenLayoutParams = when (parent) {
+                    is FrameLayout -> FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT
+                    )
+                    is ViewGroup -> ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    else -> originalLayoutParams
+                }
+                
                 addOnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
                     val newWidth = right - left
                     val newHeight = bottom - top
@@ -761,47 +778,18 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                     android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 )
                 
-                originalLayoutParams = layout.layoutParams
-                parentViewGroup?.removeView(layout)
-                
-                fullscreenContainer = FrameLayout(context).apply {
-                    setBackgroundColor(android.graphics.Color.BLACK)
-                    addView(layout, FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        Gravity.CENTER
-                    ))
-                    
-                    // 전체화면 종료 버튼 추가
-                    addView(android.widget.Button(context).apply {
-                        text = "⧉"
-                        textSize = 20f
-                        setTextColor(android.graphics.Color.WHITE)
-                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        setPadding(8, 8, 8, 8)
-                        setOnClickListener { exitFullscreen() }
-                    }, FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        FrameLayout.LayoutParams.WRAP_CONTENT,
-                        Gravity.END or Gravity.TOP
-                    ).apply { setMargins(0, FULLSCREEN_BUTTON_MARGIN, FULLSCREEN_BUTTON_MARGIN, 0) })
-                    
-                    // PTZ 컨트롤이 보이는 상태에서만 전체화면에 추가
-                    if (isPtzVisible) {
-                        ptzContainer?.let { ptzControl ->
-                            (ptzControl.parent as? ViewGroup)?.removeView(ptzControl)
-                            addView(ptzControl)
-                        }
-                    }
+                // VandiPlay 방식: 레이아웃 파라미터만 변경 (영상 끊김 없음)
+                fullscreenLayoutParams?.let { params ->
+                    layout.layoutParams = params
                 }
                 
-                (act.window.decorView as ViewGroup).addView(fullscreenContainer, FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT
-                ))
+                // UI 요소들 숨기기
+                hideUIElements()
+                
+                // 전체화면 콜백 호출
+                playerCallback?.onFullscreenEntered()
                 
                 layout.post {
-                    mediaPlayer?.attachViews(layout, null, true, false)
                     adjustVideoScaleForFullscreen(layout, act)
                 }
                 
@@ -816,49 +804,51 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             // 시스템 UI 복원
             act.window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
             
-            fullscreenContainer?.let { container ->
-                videoLayout?.let { layout ->
-                    container.removeView(layout)
-                    
-                    // PTZ 컨트롤이 보이는 상태였다면 전체화면에서 제거 후 원래 위치에 다시 생성
-                    if (isPtzVisible) {
-                        ptzContainer?.let { ptzControl ->
-                            container.removeView(ptzControl)
-                            ptzContainer = null // 기존 컨테이너 참조 제거
-                        }
-                    }
-                    
-                    (act.window.decorView as ViewGroup).removeView(container)
-                    
-                    parentViewGroup?.let { parent ->
-                        originalLayoutParams?.let { layout.layoutParams = it }
-                        parent.addView(layout)
-                    }
-                    
-                    // PTZ 컨트롤이 보이는 상태였다면 원래 위치에 다시 생성
-                    if (isPtzVisible) {
-                        createPtzControl()
-                    }
-                    
-                    layout.post {
-                        mediaPlayer?.attachViews(layout, null, true, false)
-                        setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
-                    }
-                    
-                    fullscreenContainer = null
-                    isFullscreen = false
-                    updateFullscreenButtonIcon()
+            videoLayout?.let { layout ->
+                // VandiPlay 방식: 원본 레이아웃 파라미터로 복원 (영상 끊김 없음)
+                originalLayoutParams?.let { params ->
+                    layout.layoutParams = params
                 }
+                
+                // UI 요소들 다시 표시
+                showUIElements()
+                
+                // 전체화면 종료 콜백 호출
+                playerCallback?.onFullscreenExited()
+                
+                layout.post {
+                    setVideoScaleMode(VideoScaleMode.FIT_WINDOW)
+                }
+                
+                isFullscreen = false
+                updateFullscreenButtonIcon()
             }
         }
+    }
+    
+    /**
+     * 전체화면 모드에서 UI 요소들 숨기기 (전체화면 버튼은 유지)
+     */
+    private fun hideUIElements() {
+        buttonContainer?.visibility = android.view.View.GONE
+        // 전체화면 버튼은 종료를 위해 항상 표시
+        recordButton?.buttonView?.visibility = android.view.View.GONE
+        captureButton?.buttonView?.visibility = android.view.View.GONE
+    }
+    
+    /**
+     * 일반 모드에서 UI 요소들 다시 표시
+     */
+    private fun showUIElements() {
+        buttonContainer?.visibility = android.view.View.VISIBLE
+        // 전체화면 버튼은 항상 표시
+        recordButton?.buttonView?.visibility = android.view.View.VISIBLE
+        captureButton?.buttonView?.visibility = android.view.View.VISIBLE
     }
 
     private fun updateFullscreenButtonIcon() {
         val icon = if (isFullscreen) "⧉" else "⧈"
-        when (val button = fullscreenButton) {
-            is XLABPlayerButton -> button.setAsFullscreenButton(icon)
-            is SimpleFullscreenButton -> button.updateIcon()
-        }
+        fullscreenButton?.setAsFullscreenButton(icon)
     }
     
     fun isInFullscreen(): Boolean = isFullscreen
@@ -1004,10 +994,7 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
         }
     }
     
-    private inner class SimpleFullscreenButton(val button: android.widget.Button) {
-        fun setAsTransparentIconButton(icon: String) { button.text = icon }
-        fun updateIcon() { button.text = if (isFullscreen) "⧉" else "⧈" }
-    }
+
 
     private fun adjustVideoScaleForFullscreen(layout: VLCVideoLayout, activity: Activity) {
         try {

@@ -1,11 +1,13 @@
 package com.xlab.debug
 
 import android.os.Bundle
-import android.widget.Button
+import android.util.Log
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.xlab.Player.XLABPlayer
+import com.xlab.Player.XLABPlayerButton
 import com.xlab.Player.R
 
 /**
@@ -20,19 +22,22 @@ class DualPlayerActivity : AppCompatActivity() {
     
     // 첫 번째 플레이어 UI 컴포넌트들
     private lateinit var videoContainer1: FrameLayout
-    private lateinit var connectButton1: Button
-    private lateinit var playButton1: Button
-    private lateinit var pauseButton1: Button
-    private lateinit var stopButton1: Button
-    private lateinit var disconnectButton1: Button
+    private lateinit var buttonContainer1: LinearLayout
+    private lateinit var playerLayout1: LinearLayout
     
     // 두 번째 플레이어 UI 컴포넌트들
     private lateinit var videoContainer2: FrameLayout
-    private lateinit var connectButton2: Button
-    private lateinit var playButton2: Button
-    private lateinit var pauseButton2: Button
-    private lateinit var stopButton2: Button
-    private lateinit var disconnectButton2: Button
+    private lateinit var buttonContainer2: LinearLayout
+    private lateinit var playerLayout2: LinearLayout
+    
+    // 전체화면 상태 관리
+    private var originalLayoutParams1: LinearLayout.LayoutParams? = null
+    private var originalLayoutParams2: LinearLayout.LayoutParams? = null
+    private var currentFullscreenPlayer: Int = 0 // 0: 없음, 1: 플레이어1, 2: 플레이어2
+    
+    // 루트 레이아웃 관리
+    private lateinit var rootLayout: LinearLayout
+    private var originalRootPadding: IntArray = intArrayOf(0, 0, 0, 0) // left, top, right, bottom
     
     // XLABPlayer 인스턴스들
     private var xlabPlayer1: XLABPlayer? = null
@@ -44,28 +49,34 @@ class DualPlayerActivity : AppCompatActivity() {
         
         initViews()
         setupPlayers()
-        setupButtons()
     }
     
     /**
      * UI 컴포넌트 초기화
      */
     private fun initViews() {
+        // 루트 레이아웃
+        rootLayout = findViewById(R.id.root_layout)
+        originalRootPadding = intArrayOf(
+            rootLayout.paddingLeft,
+            rootLayout.paddingTop, 
+            rootLayout.paddingRight,
+            rootLayout.paddingBottom
+        )
+        
         // 첫 번째 플레이어 UI
         videoContainer1 = findViewById(R.id.video_container_1)
-        connectButton1 = findViewById(R.id.connect_button_1)
-        playButton1 = findViewById(R.id.play_button_1)
-        pauseButton1 = findViewById(R.id.pause_button_1)
-        stopButton1 = findViewById(R.id.stop_button_1)
-        disconnectButton1 = findViewById(R.id.disconnect_button_1)
+        buttonContainer1 = findViewById(R.id.button_container_1)
+        playerLayout1 = videoContainer1.parent as LinearLayout
         
         // 두 번째 플레이어 UI
         videoContainer2 = findViewById(R.id.video_container_2)
-        connectButton2 = findViewById(R.id.connect_button_2)
-        playButton2 = findViewById(R.id.play_button_2)
-        pauseButton2 = findViewById(R.id.pause_button_2)
-        stopButton2 = findViewById(R.id.stop_button_2)
-        disconnectButton2 = findViewById(R.id.disconnect_button_2)
+        buttonContainer2 = findViewById(R.id.button_container_2)
+        playerLayout2 = videoContainer2.parent as LinearLayout
+        
+        // 원본 레이아웃 파라미터 저장
+        originalLayoutParams1 = playerLayout1.layoutParams as LinearLayout.LayoutParams
+        originalLayoutParams2 = playerLayout2.layoutParams as LinearLayout.LayoutParams
     }
     
     /**
@@ -80,8 +91,8 @@ class DualPlayerActivity : AppCompatActivity() {
      * 첫 번째 플레이어 설정
      */
     private fun setupPlayer1() {
-        xlabPlayer1 = createPlayer("플레이어1", ::updateButtonStates1).also { player ->
-            initializePlayer(player, videoContainer1, "플레이어1", 1)
+        xlabPlayer1 = createPlayer("플레이어1", 1).also { player ->
+            initializePlayer(player, videoContainer1, buttonContainer1, "플레이어1", 1)
         }
     }
     
@@ -89,33 +100,59 @@ class DualPlayerActivity : AppCompatActivity() {
      * 두 번째 플레이어 설정
      */
     private fun setupPlayer2() {
-        xlabPlayer2 = createPlayer("플레이어2", ::updateButtonStates2).also { player ->
-            initializePlayer(player, videoContainer2, "플레이어2", 2)
+        xlabPlayer2 = createPlayer("플레이어2", 2).also { player ->
+            initializePlayer(player, videoContainer2, buttonContainer2, "플레이어2", 2)
         }
     }
     
     /**
      * 공통 플레이어 생성
      */
-    private fun createPlayer(playerName: String, updateStates: () -> Unit): XLABPlayer? {
+    private fun createPlayer(playerName: String, cameraId: Int): XLABPlayer? {
         return try {
             XLABPlayer(this).apply {
                 setCallback(object : XLABPlayer.PlayerCallback {
-                    override fun onPlayerReady() = runOnUiThread { updateStates() }
-                    override fun onPlayerConnected() = runOnUiThread { updateStates() }
-                    override fun onPlayerDisconnected() = runOnUiThread { updateStates() }
-                    override fun onPlayerPlaying() = runOnUiThread { updateStates() }
-                    override fun onPlayerPaused() = runOnUiThread { updateStates() }
+                    override fun onPlayerReady() = runOnUiThread {
+                        Log.d(TAG, "$playerName 준비됨")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 준비됨", Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onPlayerConnected() = runOnUiThread {
+                        Log.d(TAG, "$playerName 연결됨")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 연결됨", Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onPlayerDisconnected() = runOnUiThread {
+                        Log.d(TAG, "$playerName 연결 해제됨")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 연결 해제됨", Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onPlayerPlaying() = runOnUiThread {
+                        Log.d(TAG, "$playerName 재생 중")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 재생 중", Toast.LENGTH_SHORT).show()
+                    }
+                    override fun onPlayerPaused() = runOnUiThread {
+                        Log.d(TAG, "$playerName 일시정지됨")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 일시정지됨", Toast.LENGTH_SHORT).show()
+                    }
                     override fun onPlayerError(error: String) = runOnUiThread {
-                        updateStates()
-                        Toast.makeText(this@DualPlayerActivity, "$playerName 오류: $error", Toast.LENGTH_SHORT).show()
+                        Log.e(TAG, "$playerName 오류: $error")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 오류: $error", Toast.LENGTH_LONG).show()
                     }
                     override fun onVideoSizeChanged(width: Int, height: Int) = Unit
                     override fun onPtzCommand(command: String, success: Boolean) = Unit
+                    override fun onFullscreenEntered() = runOnUiThread {
+                        Log.d(TAG, "$playerName 전체화면 진입")
+                        // Activity 레벨에서 레이아웃 조작
+                        handleFullscreenEntered(playerName, cameraId)
+                    }
+                    override fun onFullscreenExited() = runOnUiThread {
+                        Log.d(TAG, "$playerName 전체화면 종료")
+                        // Activity 레벨에서 레이아웃 복원
+                        handleFullscreenExited(playerName, cameraId)
+                    }
                 })
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "$playerName 설정 실패", Toast.LENGTH_LONG).show()
+            Log.e(TAG, "$playerName 설정 실패: ${e.message}")
+            Toast.makeText(this, "$playerName 설정 실패: ${e.message}", Toast.LENGTH_LONG).show()
             null
         }
     }
@@ -123,141 +160,184 @@ class DualPlayerActivity : AppCompatActivity() {
     /**
      * 공통 플레이어 초기화
      */
-    private fun initializePlayer(player: XLABPlayer?, container: FrameLayout, playerName: String, cameraId: Int) {
-        val success = player?.initialize(container) ?: false
+    private fun initializePlayer(
+        player: XLABPlayer?, 
+        container: FrameLayout, 
+        buttonContainer: LinearLayout,
+        playerName: String, 
+        cameraId: Int
+    ) {
+        Log.d(TAG, "$playerName 초기화 시작...")
+        
+        if (player == null) {
+            Log.e(TAG, "$playerName 플레이어가 null입니다")
+            Toast.makeText(this, "$playerName 플레이어가 null입니다", Toast.LENGTH_LONG).show()
+            return
+        }
+        
+        val success = player.initialize(container)
+        Log.d(TAG, "$playerName 초기화 결과: $success")
+        
         if (!success) {
+            Log.e(TAG, "$playerName 초기화 실패")
             Toast.makeText(this, "$playerName 초기화 실패", Toast.LENGTH_LONG).show()
         } else {
-            player?.apply {
+            Log.d(TAG, "$playerName 초기화 성공, 버튼 설정 중...")
+            player.apply {
+                // 내장 버튼 컨테이너 추가
+                addButtonContainer(buttonContainer)
+                
+                // 4개 기본 버튼 추가
+                addButton("연결", XLABPlayerButton.ButtonType.PRIMARY) { 
+                    try {
+                        Log.d(TAG, "$playerName 연결 시도 중...")
+                        val url = if (cameraId == 1) "rtsp://192.168.144.108:554/stream=1" else "rtsp://192.168.144.108:555/stream=2"
+                        Log.d(TAG, "$playerName URL: $url")
+                        val result = connectAndPlay(url)
+                        Log.d(TAG, "$playerName 연결 결과: $result")
+                        if (!result) {
+                            Toast.makeText(this@DualPlayerActivity, "$playerName 연결 실패", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "$playerName 연결 중 예외: ${e.message}")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 연결 오류: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                addButton("재생", XLABPlayerButton.ButtonType.SUCCESS) { 
+                    try {
+                        Log.d(TAG, "$playerName 재생 시도 중...")
+                        val result = play()
+                        Log.d(TAG, "$playerName 재생 결과: $result")
+                        if (!result) {
+                            Toast.makeText(this@DualPlayerActivity, "$playerName 재생 실패", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "$playerName 재생 중 예외: ${e.message}")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 재생 오류: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                addButton("일시정지", XLABPlayerButton.ButtonType.WARNING) { 
+                    try {
+                        Log.d(TAG, "$playerName 일시정지 시도 중...")
+                        val result = pause()
+                        Log.d(TAG, "$playerName 일시정지 결과: $result")
+                        if (!result) {
+                            Toast.makeText(this@DualPlayerActivity, "$playerName 일시정지 실패", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "$playerName 일시정지 중 예외: ${e.message}")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 일시정지 오류: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                addButton("해제", XLABPlayerButton.ButtonType.DANGER) { 
+                    try {
+                        Log.d(TAG, "$playerName 해제 시도 중...")
+                        val result = disconnect()
+                        Log.d(TAG, "$playerName 해제 결과: $result")
+                        if (!result) {
+                            Toast.makeText(this@DualPlayerActivity, "$playerName 해제 실패", Toast.LENGTH_SHORT).show()
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "$playerName 해제 중 예외: ${e.message}")
+                        Toast.makeText(this@DualPlayerActivity, "$playerName 해제 오류: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                
+                // 추가 기능 버튼들
+                Log.d(TAG, "$playerName 추가 기능 버튼 추가 중...")
                 addFullscreenButton()
                 addRecordButton()
                 addCaptureButton()
+                
+                // 카메라 설정
+                Log.d(TAG, "$playerName 카메라 서버 설정 중... (cameraId: $cameraId)")
                 setCameraServer("c12", "http://192.168.144.108:5000", cameraId)
+                
+                Log.d(TAG, "$playerName PTZ 컨트롤 표시 중...")
                 showPtzControl()
+                
+                Log.d(TAG, "$playerName 설정 완료!")
             }
         }
     }
     
     /**
-     * 버튼 이벤트 설정
+     * 전체화면 진입 처리
      */
-    private fun setupButtons() {
-        // 첫 번째 플레이어 버튼들
-        connectButton1.setOnClickListener { connectPlayer1() }
-        playButton1.setOnClickListener { playPlayer1() }
-        pauseButton1.setOnClickListener { pausePlayer1() }
-        stopButton1.setOnClickListener { stopPlayer1() }
-        disconnectButton1.setOnClickListener { disconnectPlayer1() }
+    private fun handleFullscreenEntered(playerName: String, cameraId: Int) {
+        // 다른 플레이어가 이미 전체화면인 경우 먼저 복원
+        if (currentFullscreenPlayer != 0 && currentFullscreenPlayer != cameraId) {
+            handleFullscreenExited("", currentFullscreenPlayer)
+        }
         
-        // 두 번째 플레이어 버튼들
-        connectButton2.setOnClickListener { connectPlayer2() }
-        playButton2.setOnClickListener { playPlayer2() }
-        pauseButton2.setOnClickListener { pausePlayer2() }
-        stopButton2.setOnClickListener { stopPlayer2() }
-        disconnectButton2.setOnClickListener { disconnectPlayer2() }
+        // 루트 레이아웃의 padding 제거 (진짜 전체화면)
+        rootLayout.setPadding(0, 0, 0, 0)
         
-        // 초기 버튼 상태 설정
-        updateButtonStates1()
-        updateButtonStates2()
-    }
-    
-    // 공통 플레이어 제어 헬퍼 메서드
-    private fun executePlayerAction(
-        player: XLABPlayer?,
-        playerName: String,
-        action: () -> Boolean?,
-        actionName: String
-    ) {
-        try {
-            val success = action() ?: false
-            if (!success) {
-                Toast.makeText(this, "$playerName $actionName 불가", Toast.LENGTH_SHORT).show()
+        when (cameraId) {
+            1 -> {
+                // 플레이어1 전체화면: margin 제거
+                val fullscreenParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                ).apply {
+                    setMargins(0, 0, 0, 0) // margin 모두 제거
+                }
+                playerLayout1.layoutParams = fullscreenParams
+                playerLayout2.visibility = android.view.View.GONE
+                currentFullscreenPlayer = 1
+                Log.d(TAG, "플레이어1이 전체화면으로 전환됨")
             }
-        } catch (e: Exception) {
-            Toast.makeText(this, "$playerName $actionName 실패", Toast.LENGTH_SHORT).show()
+            2 -> {
+                // 플레이어2 전체화면: margin 제거
+                val fullscreenParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT
+                ).apply {
+                    setMargins(0, 0, 0, 0) // margin 모두 제거
+                }
+                playerLayout2.layoutParams = fullscreenParams
+                playerLayout1.visibility = android.view.View.GONE
+                currentFullscreenPlayer = 2
+                Log.d(TAG, "플레이어2가 전체화면으로 전환됨")
+            }
         }
+        
+        Toast.makeText(this, "$playerName 전체화면", Toast.LENGTH_SHORT).show()
     }
-
-    // 첫 번째 플레이어 제어 메서드들
-    private fun connectPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
-        xlabPlayer1?.connectAndPlay("rtsp://192.168.144.108:554/stream=1")
-    }, "연결")
-    
-    private fun playPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
-        xlabPlayer1?.play()
-    }, "재생")
-    
-    private fun pausePlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
-        xlabPlayer1?.pause()
-    }, "일시정지")
-    
-    private fun stopPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
-        xlabPlayer1?.stop()
-    }, "정지")
-    
-    private fun disconnectPlayer1() = executePlayerAction(xlabPlayer1, "플레이어1", {
-        xlabPlayer1?.disconnect()
-    }, "연결 해제")
-    
-    // 두 번째 플레이어 제어 메서드들
-    private fun connectPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
-        xlabPlayer2?.connectAndPlay("rtsp://192.168.144.108:555/stream=2")
-    }, "연결")
-    
-    private fun playPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
-        xlabPlayer2?.play()
-    }, "재생")
-    
-    private fun pausePlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
-        xlabPlayer2?.pause()
-    }, "일시정지")
-    
-    private fun stopPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
-        xlabPlayer2?.stop()
-    }, "정지")
-    
-    private fun disconnectPlayer2() = executePlayerAction(xlabPlayer2, "플레이어2", {
-        xlabPlayer2?.disconnect()
-    }, "연결 해제")
     
     /**
-     * 공통 버튼 상태 업데이트 헬퍼 메서드
+     * 전체화면 종료 처리
      */
-    private fun updatePlayerButtonStates(
-        player: XLABPlayer?,
-        connectButton: Button,
-        playButton: Button,
-        pauseButton: Button,
-        stopButton: Button,
-        disconnectButton: Button
-    ) {
-        player?.let { p ->
-            val isReady = p.isPlayerReady()
-            val isConnected = p.isPlayerConnected()
-            val isPlaying = p.isPlayerPlaying()
-            
-            connectButton.isEnabled = isReady && !isConnected
-            playButton.isEnabled = isConnected && !isPlaying
-            pauseButton.isEnabled = isConnected && isPlaying
-            stopButton.isEnabled = isConnected
-            disconnectButton.isEnabled = isConnected
+    private fun handleFullscreenExited(playerName: String, cameraId: Int) {
+        // 루트 레이아웃의 padding 복원
+        rootLayout.setPadding(
+            originalRootPadding[0], // left
+            originalRootPadding[1], // top  
+            originalRootPadding[2], // right
+            originalRootPadding[3]  // bottom
+        )
+        
+        when (cameraId) {
+            1 -> {
+                // 플레이어1 원본 복원
+                originalLayoutParams1?.let { params ->
+                    playerLayout1.layoutParams = params
+                }
+                playerLayout2.visibility = android.view.View.VISIBLE
+                Log.d(TAG, "플레이어1이 원본 크기로 복원됨")
+            }
+            2 -> {
+                // 플레이어2 원본 복원
+                originalLayoutParams2?.let { params ->
+                    playerLayout2.layoutParams = params
+                }
+                playerLayout1.visibility = android.view.View.VISIBLE
+                Log.d(TAG, "플레이어2가 원본 크기로 복원됨")
+            }
         }
-    }
-    
-    /**
-     * 첫 번째 플레이어 버튼 상태 업데이트
-     */
-    private fun updateButtonStates1() {
-        updatePlayerButtonStates(xlabPlayer1, connectButton1, playButton1, 
-            pauseButton1, stopButton1, disconnectButton1)
-    }
-    
-    /**
-     * 두 번째 플레이어 버튼 상태 업데이트
-     */
-    private fun updateButtonStates2() {
-        updatePlayerButtonStates(xlabPlayer2, connectButton2, playButton2, 
-            pauseButton2, stopButton2, disconnectButton2)
+        
+        currentFullscreenPlayer = 0
+        Toast.makeText(this, "$playerName 원본 크기", Toast.LENGTH_SHORT).show()
     }
     
     override fun onDestroy() {
