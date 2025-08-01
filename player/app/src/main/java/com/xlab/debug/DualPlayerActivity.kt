@@ -45,6 +45,20 @@ class DualPlayerActivity : AppCompatActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // 시스템 UI 완전 숨기기 (상태바, 네비게이션 바, 액션바)
+        window.decorView.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+        )
+        
+        // 액션바 숨기기
+        supportActionBar?.hide()
+        
         setContentView(R.layout.activity_dual_player)
         
         initViews()
@@ -302,15 +316,8 @@ class DualPlayerActivity : AppCompatActivity() {
             }
         }
 
-        // 시스템 UI 숨기기 (상태바, 네비게이션 바)
-        window.decorView.systemUiVisibility = (
-            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
-            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
-            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-            android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-        )
+        // 시스템 UI 숨기기 (상태바, 네비게이션 바) - 이미 onCreate에서 설정됨
+        // window.decorView.systemUiVisibility = (...) // 중복 제거
         
         Toast.makeText(this, "$playerName 전체화면", Toast.LENGTH_SHORT).show()
     }
@@ -319,8 +326,8 @@ class DualPlayerActivity : AppCompatActivity() {
      * 전체화면 종료 처리
      */
     private fun handleFullscreenExited(playerName: String, cameraId: Int) {
-        // 시스템 UI 복원
-        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
+        // 시스템 UI는 그대로 유지 (빈 액티비티 형태 유지)
+        // window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_VISIBLE
         
         // 루트 레이아웃의 padding 복원
         rootLayout.setPadding(

@@ -3,16 +3,16 @@
     android:id="@+id/root_layout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="8dp">
+    android:orientation="horizontal"
+    android:padding="4dp">
 
-    <!-- 첫 번째 플레이어 영역 -->
+    <!-- 첫 번째 플레이어 영역 (왼쪽) -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:layout_marginBottom="4dp">
+        android:layout_marginEnd="2dp">
 
         <!-- 첫 번째 비디오 영역 -->
         <FrameLayout
@@ -21,7 +21,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:background="#000000"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="4dp" />
 
         <!-- 첫 번째 플레이어 버튼 컨테이너 -->
         <LinearLayout
@@ -32,13 +32,13 @@
 
     </LinearLayout>
 
-    <!-- 두 번째 플레이어 영역 -->
+    <!-- 두 번째 플레이어 영역 (오른쪽) -->
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
         android:layout_weight="1"
         android:orientation="vertical"
-        android:layout_marginTop="4dp">
+        android:layout_marginStart="2dp">
 
         <!-- 두 번째 비디오 영역 -->
         <FrameLayout
@@ -47,7 +47,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:background="#000000"
-            android:layout_marginBottom="8dp" />
+            android:layout_marginBottom="4dp" />
 
         <!-- 두 번째 플레이어 버튼 컨테이너 -->
         <LinearLayout

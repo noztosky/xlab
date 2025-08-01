@@ -520,16 +520,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
                 addOption(":vout-display-delay=0")
                 addOption(":audio-delay=0")
                 addOption(":drop-late-frames")          // 지연된 프레임만 드랍
-
-
-
-
-
-
-
-
-
-
             }
             mediaPlayer?.media = media
             mediaPlayer?.play()
@@ -732,41 +722,15 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             val params = layout.layoutParams
             when (mode) {
                 VideoScaleMode.FIT_WINDOW -> {
-                    if (!isFullscreen) {
-                        params.width = ViewGroup.LayoutParams.MATCH_PARENT
-                        params.height = ViewGroup.LayoutParams.MATCH_PARENT
-                        layout.layoutParams = params
-                        
-                        // 가로세로 비율을 유지하면서 화면을 가득 채우되 영상이 잘리지 않도록 조정
-                        layout.post {
-                            val containerWidth = layout.width.toFloat()
-                            val containerHeight = layout.height.toFloat()
-                            
-                            if (containerWidth > 0 && containerHeight > 0) {
-                                // 일반적인 비디오 비율 (16:9)을 기준으로 스케일 계산
-                                val videoAspectRatio = 16f / 9f  // 1.777...
-                                val containerAspectRatio = containerWidth / containerHeight
-                                
-                                // 화면을 가득 채우면서 영상이 잘리지 않도록 하는 스케일 계산
-                                val finalScale = if (containerAspectRatio > videoAspectRatio) {
-                                    // 컨테이너가 더 넓은 경우 - 세로를 기준으로 맞춤
-                                    containerHeight / (containerWidth / videoAspectRatio)
-                                } else {
-                                    // 컨테이너가 더 높은 경우 - 가로를 기준으로 맞춤
-                                    containerWidth / (containerHeight * videoAspectRatio)
-                                }
-                                
-                                // 적절한 범위로 제한
-                                val clampedScale = finalScale.coerceIn(1.2f, 2.5f)
-                                
-                                layout.scaleX = clampedScale
-                                layout.scaleY = clampedScale
-                            } else {
-                                layout.scaleX = 1.5f
-                                layout.scaleY = 1.5f
-                            }
-                        }
-                    }
+                    params.width = ViewGroup.LayoutParams.MATCH_PARENT
+                    params.height = ViewGroup.LayoutParams.MATCH_PARENT
+                    layout.layoutParams = params
+                    
+                    // 일반 모드에서는 컨테이너에 맞춰 1.0 스케일 적용
+                    layout.scaleX = 1.0f
+                    layout.scaleY = 1.0f
+                    
+                    android.util.Log.d("XLABPlayer", "FIT_WINDOW 모드: 컨테이너 기준 스케일 1.0 적용")
                 }
                 VideoScaleMode.FILL_WINDOW -> {
                     params.width = ViewGroup.LayoutParams.MATCH_PARENT
@@ -1023,8 +987,6 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             }
         }
     }
-    
-
 
     private fun adjustVideoScaleForFullscreen(layout: VLCVideoLayout, activity: Activity) {
         try {
@@ -1033,20 +995,37 @@ class XLABPlayer(private val context: Context) : LifecycleObserver {
             val screenHeight = displayMetrics.heightPixels.toFloat()
             val videoWidth = layout.width.toFloat()
             val videoHeight = layout.height.toFloat()
-            
+
+            // 디버그 출력 - 화면 사이즈와 영상 사이즈
+            android.util.Log.d("XLABPlayer", "=== 화면/영상 사이즈 디버그 ===")
+            android.util.Log.d("XLABPlayer", "화면 사이즈: ${screenWidth.toInt()} x ${screenHeight.toInt()}")
+            android.util.Log.d("XLABPlayer", "영상 사이즈: ${videoWidth.toInt()} x ${videoHeight.toInt()}")
+            android.util.Log.d("XLABPlayer", "화면 비율: ${String.format("%.2f", screenWidth/screenHeight)}")
+            android.util.Log.d("XLABPlayer", "영상 비율: ${String.format("%.2f", videoWidth/videoHeight)}")
+
             if (videoWidth > 0 && videoHeight > 0) {
-                val screenRatio = screenWidth / screenHeight
-                val videoRatio = videoWidth / videoHeight
-                val scale = if (videoRatio > screenRatio) screenWidth / videoWidth else screenHeight / videoHeight
-                val finalScale = scale.coerceIn(1.0f, 3.0f)
-                
+                // 영상 전체가 보이도록 더 작은 스케일 사용 (letterbox/pillarbox)
+                val scaleWidth = screenWidth / videoWidth   // 너비 기준 스케일
+                val scaleHeight = screenHeight / videoHeight // 높이 기준 스케일
+                val scale = minOf(scaleWidth, scaleHeight)   // 더 작은 스케일 선택
+
+                val finalScale = scale.coerceIn(0.1f, 3.0f)
+
+                android.util.Log.d("XLABPlayer", "너비 기준 스케일: ${String.format("%.2f", scaleWidth)}")
+                android.util.Log.d("XLABPlayer", "높이 기준 스케일: ${String.format("%.2f", scaleHeight)}")
+                android.util.Log.d("XLABPlayer", "계산된 스케일: ${String.format("%.2f", scale)}")
+                android.util.Log.d("XLABPlayer", "최종 스케일: ${String.format("%.2f", finalScale)}")
+                android.util.Log.d("XLABPlayer", "=== 디버그 끝 ===")
+
                 layout.scaleX = finalScale
                 layout.scaleY = finalScale
             } else {
+                android.util.Log.d("XLABPlayer", "영상 사이즈가 0입니다. 기본 스케일 1.5 적용")
                 layout.scaleX = 1.5f
                 layout.scaleY = 1.5f
             }
         } catch (e: Exception) {
+            android.util.Log.e("XLABPlayer", "스케일 조정 중 오류: ${e.message}")
             layout.scaleX = 1.5f
             layout.scaleY = 1.5f
         }

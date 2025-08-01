@@ -11,8 +11,8 @@ android {
         applicationId = "com.xlab.Player"
         minSdk = 24
         targetSdk = 33
-        versionCode = 13
-        versionName = "4.2"
+        versionCode = 19
+        versionName = "4.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
