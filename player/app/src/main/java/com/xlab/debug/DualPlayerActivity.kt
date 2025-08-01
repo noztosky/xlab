@@ -47,6 +47,19 @@ class DualPlayerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         
         // 시스템 UI 완전 숨기기 (상태바, 네비게이션 바, 액션바)
+        enableFullscreenMode()
+        
+        setContentView(R.layout.activity_dual_player)
+        
+        initViews()
+        setupPlayers()
+    }
+    
+    private fun enableFullscreenMode() {
+        // 액션바 숨기기
+        supportActionBar?.hide()
+        
+        // 상태바 및 네비게이션 바 완전 숨기기
         window.decorView.systemUiVisibility = (
             android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
             android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -56,13 +69,13 @@ class DualPlayerActivity : AppCompatActivity() {
             android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
         )
         
-        // 액션바 숨기기
-        supportActionBar?.hide()
-        
-        setContentView(R.layout.activity_dual_player)
-        
-        initViews()
-        setupPlayers()
+        // 시스템 UI가 다시 나타나는 것을 방지
+        window.decorView.setOnSystemUiVisibilityChangeListener { visibility ->
+            if (visibility and android.view.View.SYSTEM_UI_FLAG_FULLSCREEN == 0) {
+                // 시스템 UI가 나타나면 다시 숨기기
+                enableFullscreenMode()
+            }
+        }
     }
     
     /**
@@ -374,6 +387,12 @@ class DualPlayerActivity : AppCompatActivity() {
             // 일반 상태에서는 기본 백 버튼 동작
             super.onBackPressed()
         }
+    }
+    
+    override fun onResume() {
+        super.onResume()
+        // 앱이 다시 활성화될 때 전체화면 모드 재적용
+        enableFullscreenMode()
     }
     
     override fun onDestroy() {

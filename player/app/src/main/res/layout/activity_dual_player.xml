@@ -4,7 +4,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="horizontal"
-    android:padding="4dp">
+    android:background="#000000"
+    android:padding="0dp">
 
     <!-- 첫 번째 플레이어 영역 (왼쪽) -->
     <LinearLayout
